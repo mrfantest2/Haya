@@ -20,7 +20,8 @@ jobs:
               source-v3/parts/part01 \
               source-v3/parts/part02 \
               source-v3/parts/part03 \
-              source-v3/parts/part04 \
+              source-v3/parts/part04a \
+              source-v3/parts/part04b \
               source-v3/parts/part05 \
               source-v3/parts/part06 \
               > source-v3/Haya_Job_Autopilot_v3.0.0_Source.exact.zip
