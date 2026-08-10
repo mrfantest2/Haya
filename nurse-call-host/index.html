@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#0b5fff" />
+  <title>Call Nurse</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#10213a;background:#f4f7fb}
+    *{box-sizing:border-box} body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px}
+    .card{width:min(520px,100%);background:white;border-radius:28px;padding:28px;box-shadow:0 18px 55px rgba(25,55,95,.14);text-align:center}
+    .eyebrow{font-weight:700;color:#60708a;font-size:14px;letter-spacing:.08em;text-transform:uppercase}
+    h1{margin:8px 0 4px;font-size:clamp(30px,8vw,46px)} .room{font-size:20px;color:#53647d;margin-bottom:28px}
+    button{width:100%;border:0;border-radius:26px;font:inherit;font-weight:800;cursor:pointer}
+    #call{min-height:190px;background:#e32636;color:white;font-size:clamp(30px,9vw,50px);box-shadow:0 12px 28px rgba(227,38,54,.28)}
+    #call:active{transform:scale(.985)} #call[disabled]{opacity:.62;cursor:default}
+    .status{min-height:34px;margin:22px 0 0;font-weight:750;color:#34445d}.ok{color:#117a45}.bad{color:#b42318}.waiting{color:#8a5a00}
+    .setup{margin-top:20px;text-align:left;background:#f6f8fb;border-radius:18px;padding:16px;color:#526178;font-size:14px;display:none}
+    .setup input{width:100%;margin-top:8px;padding:12px;border:1px solid #ccd5e2;border-radius:12px}
+    .setup button{margin-top:10px;background:#0b5fff;color:white;padding:12px;border-radius:12px}
+    footer{margin-top:22px;font-size:12px;color:#8090a7}
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="eyebrow">Patient Assistance</div>
+    <h1>Need help?</h1>
+    <div class="room" id="roomLabel">Room —</div>
+    <button id="call" type="button">CALL<br>NURSE</button>
+    <div id="status" class="status" aria-live="polite"></div>
+    <section id="setup" class="setup">
+      <strong>Bedside setup</strong><br>
+      Configure this device once using a URL containing <code>?room=101A&amp;ward=ward-a&amp;topic=...</code>.
+      <input id="roomInput" autocomplete="off" placeholder="Room / bed" />
+      <input id="wardInput" autocomplete="off" placeholder="Ward code" />
+      <input id="topicInput" autocomplete="off" placeholder="Receiver channel" />
+      <button id="saveSetup" type="button">Save bedside setup</button>
+    </section>
+    <footer>For non-emergency assistance. Follow the facility's emergency procedure for urgent clinical emergencies.</footer>
+  </main>
+<script>
+(() => {
+  const qs = new URLSearchParams(location.search);
+  const fromQuery = {
+    room: (qs.get('room') || '').trim(),
+    ward: (qs.get('ward') || '').trim().toLowerCase(),
+    topic: (qs.get('topic') || '').trim()
+  };
+  for (const [k,v] of Object.entries(fromQuery)) if (v) localStorage.setItem(`nurseCall_${k}`, v);
+  if (fromQuery.topic) {
+    const clean = new URL(location.href);
+    clean.searchParams.delete('topic');
+    history.replaceState(null, '', clean.pathname + clean.search + clean.hash);
+  }
+
+  let room = fromQuery.room || localStorage.getItem('nurseCall_room') || '';
+  let ward = fromQuery.ward || localStorage.getItem('nurseCall_ward') || '';
+  let topic = fromQuery.topic || localStorage.getItem('nurseCall_topic') || '';
+  let activeCallId = sessionStorage.getItem('nurseCall_activeCallId') || '';
+  let socket = null;
+  let reconnectMs = 1500;
+  let timeoutHandle = null;
+
+  const roomLabel = document.getElementById('roomLabel');
+  const callBtn = document.getElementById('call');
+  const status = document.getElementById('status');
+  const setup = document.getElementById('setup');
+  const roomInput = document.getElementById('roomInput');
+  const wardInput = document.getElementById('wardInput');
+  const topicInput = document.getElementById('topicInput');
+
+  function validWard(v){ return /^[a-z0-9._-]{1,32}$/.test(v); }
+  function validTopic(v){ return v.length >= 20 && /^[A-Za-z0-9_-]+$/.test(v); }
+  function ready(){ return room.length > 0 && validWard(ward) && validTopic(topic); }
+  function render(){
+    roomLabel.textContent = room ? `Room ${room}` : 'Room not configured';
+    setup.style.display = ready() ? 'none' : 'block';
+    roomInput.value = room; wardInput.value = ward; topicInput.value = topic;
+  }
+  function setIdle(){
+    activeCallId = '';
+    sessionStorage.removeItem('nurseCall_activeCallId');
+    callBtn.disabled = false;
+    callBtn.innerHTML = 'CALL<br>NURSE';
+    if (timeoutHandle) { clearTimeout(timeoutHandle); timeoutHandle = null; }
+  }
+
+  function connectSocket(){
+    if (!validTopic(topic)) return;
+    try { if (socket) socket.close(); } catch (_) {}
+    const wsUrl = `wss://ntfy.sh/${encodeURIComponent(topic)}/ws?since=2m`;
+    socket = new WebSocket(wsUrl);
+    socket.onopen = () => { reconnectMs = 1500; };
+    socket.onmessage = (event) => {
+      try {
+        const envelope = JSON.parse(event.data);
+        if (envelope.event !== 'message' || !envelope.message) return;
+        const payload = JSON.parse(envelope.message);
+        if (payload.type !== 'ack' || !activeCallId) return;
+        if (payload.callId !== activeCallId || String(payload.ward || '').toLowerCase() !== ward) return;
+        status.textContent = 'Nurse acknowledged — help is on the way';
+        status.className = 'status ok';
+        callBtn.innerHTML = 'NURSE<br>ACKNOWLEDGED';
+        callBtn.disabled = true;
+        if (navigator.vibrate) navigator.vibrate([120,70,120]);
+        if (timeoutHandle) { clearTimeout(timeoutHandle); timeoutHandle = null; }
+        setTimeout(setIdle, 12000);
+      } catch (_) {}
+    };
+    socket.onclose = () => {
+      setTimeout(connectSocket, reconnectMs);
+      reconnectMs = Math.min(reconnectMs * 2, 15000);
+    };
+    socket.onerror = () => { try { socket.close(); } catch (_) {} };
+  }
+
+  document.getElementById('saveSetup').addEventListener('click', () => {
+    room = roomInput.value.trim();
+    ward = wardInput.value.trim().toLowerCase();
+    topic = topicInput.value.trim();
+    if (!room || !validWard(ward) || !validTopic(topic)) {
+      status.textContent = 'Enter a room, valid ward code, and receiver channel.';
+      status.className = 'status bad';
+      return;
+    }
+    localStorage.setItem('nurseCall_room', room);
+    localStorage.setItem('nurseCall_ward', ward);
+    localStorage.setItem('nurseCall_topic', topic);
+    status.textContent = 'Bedside configured.';
+    status.className = 'status ok';
+    render();
+    connectSocket();
+  });
+
+  callBtn.addEventListener('click', async () => {
+    if (!ready()) {
+      setup.style.display = 'block';
+      status.textContent = 'This bedside device is not configured yet.';
+      status.className = 'status bad';
+      return;
+    }
+    if (activeCallId) return;
+    if (!socket || socket.readyState > 1) connectSocket();
+    callBtn.disabled = true;
+    status.textContent = 'Calling nurse…';
+    status.className = 'status';
+
+    const callId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const message = JSON.stringify({type:'call',callId,room,ward,createdAt:Date.now()});
+    try {
+      const res = await fetch('https://ntfy.sh/', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ topic, message, priority: 5 })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      activeCallId = callId;
+      sessionStorage.setItem('nurseCall_activeCallId', callId);
+      status.textContent = 'Nurse notified — waiting for acknowledgement…';
+      status.className = 'status waiting';
+      callBtn.innerHTML = 'CALL<br>SENT';
+      if (navigator.vibrate) navigator.vibrate([80,50,80]);
+      timeoutHandle = setTimeout(() => {
+        if (activeCallId !== callId) return;
+        status.textContent = 'No acknowledgement yet. Please contact staff directly if help is urgent.';
+        status.className = 'status bad';
+        setIdle();
+      }, 120000);
+    } catch (_) {
+      status.textContent = 'Call could not be delivered. Please contact staff directly.';
+      status.className = 'status bad';
+      setIdle();
+    }
+  });
+
+  render();
+  if (ready()) connectSocket();
+  if (activeCallId) {
+    callBtn.disabled = true;
+    callBtn.innerHTML = 'CALL<br>SENT';
+    status.textContent = 'Nurse notified — waiting for acknowledgement…';
+    status.className = 'status waiting';
+    timeoutHandle = setTimeout(() => {
+      if (!activeCallId) return;
+      status.textContent = 'No acknowledgement yet. Please contact staff directly if help is urgent.';
+      status.className = 'status bad';
+      setIdle();
+    }, 120000);
+  }
+})();
+</script>
+</body>
+</html>
