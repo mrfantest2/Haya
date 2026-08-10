@@ -1,0 +1,78 @@
+name: Publish frozen v3.0.0 release
+
+on:
+  workflow_run:
+    workflows: ["Windows v3.0 functional smoke"]
+    types: [completed]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: v3.0.0
+      RELEASE_EXE: Haya_Job_Autopilot_v3.0.0_No_Docker.exe
+      EXPECTED_SHA256: a7c1389411fec97cdf7c92f3a4ea104f52d73abb9c97b071c01ff36c326a62c5
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.2'
+          cache: false
+      - name: Rebuild exact frozen release
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: '0'
+        run: |
+          mkdir -p release
+          go build -trimpath -ldflags='-H=windowsgui -s -w' -o "release/$RELEASE_EXE" ./manager
+          actual=$(sha256sum "release/$RELEASE_EXE" | awk '{print $1}')
+          test "$actual" = "$EXPECTED_SHA256"
+          printf '%s  %s\n' "$actual" "$RELEASE_EXE" > release/SHA256-v3.0.0.txt
+      - name: Package tagged source
+        run: |
+          git archive --format=zip --output=release/Haya_Job_Autopilot_v3.0.0_Source.zip HEAD README.md go.mod manager config docs .github/workflows
+          sha256sum release/Haya_Job_Autopilot_v3.0.0_Source.zip > release/SHA256-Source-v3.0.0.txt
+      - name: Create or update GitHub Release
+        run: |
+          cat > release/RELEASE_BODY.md <<'EOF'
+          # Haya Job Autopilot v3.0.0 - No Docker Edition
+
+          Frozen functional baseline.
+
+          - Native Windows x64 single-file application
+          - No Docker, WSL, Node.js, or administrator installation dependency
+          - Same EXE provides manager and hidden background agent
+          - Yahoo app password protected with Windows DPAPI
+          - Local dashboard bound to 127.0.0.1:8787
+          - Monitor Only, Prepare & Ask, and Strict Auto Apply modes
+          - Duplicate manager/agent process guards
+          - Windows hosted runtime smoke verified before publication
+          - Release EXE is reproduced with Go 1.23.2 and must match SHA-256 `a7c1389411fec97cdf7c92f3a4ea104f52d73abb9c97b071c01ff36c326a62c5`
+
+          v3.0.0 is frozen. Further work proceeds as v3.1.x or later.
+          EOF
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --title "Haya Job Autopilot v3.0.0 - No Docker Edition" --notes-file release/RELEASE_BODY.md --latest
+          else
+            gh release create "$RELEASE_TAG" --target "${{ github.event.workflow_run.head_sha }}" --title "Haya Job Autopilot v3.0.0 - No Docker Edition" --notes-file release/RELEASE_BODY.md --latest
+          fi
+          gh release upload "$RELEASE_TAG" \
+            "release/$RELEASE_EXE" \
+            release/SHA256-v3.0.0.txt \
+            release/Haya_Job_Autopilot_v3.0.0_Source.zip \
+            release/SHA256-Source-v3.0.0.txt \
+            --clobber
+      - name: Verify published assets
+        run: |
+          gh release view "$RELEASE_TAG" --json url,tagName,isLatest,assets
