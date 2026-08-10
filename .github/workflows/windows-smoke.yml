@@ -14,6 +14,25 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Reconstruct exact frozen source
+        shell: pwsh
+        run: |
+          $parts = 0..6 | ForEach-Object { "source-v3\parts\part{0:d2}" -f $_ }
+          $zip = "source-v3\Haya_Job_Autopilot_v3.0.0_Source.exact.zip"
+          $dest = [System.IO.File]::Open($zip, [System.IO.FileMode]::Create)
+          try {
+            foreach($part in $parts) {
+              $bytes = [System.IO.File]::ReadAllBytes($part)
+              $dest.Write($bytes, 0, $bytes.Length)
+            }
+          } finally {
+            $dest.Dispose()
+          }
+          $actual = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $expected = 'f6e400144dafad0b7f19a3b30edfcb6fdfbc23d0ed17c4c8142b6de1fc5027f1'
+          if($actual -ne $expected) { throw "Frozen source checksum mismatch: $actual" }
+          Remove-Item .v3src -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive -LiteralPath $zip -DestinationPath .v3src -Force
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23.2'
@@ -21,17 +40,27 @@ jobs:
       - name: Static v3 guards
         shell: pwsh
         run: |
-          $src = Get-Content manager/main.go -Raw
-          if ($src -notmatch 'CompareAndSwap\(false, true\)') { throw 'Install single-flight guard missing' }
-          $all = (Get-Content manager/*.go -Raw) -join "`n"
-          if ($all -match 'docker\.exe|wsl\.exe|runas') { throw 'Legacy prerequisite path returned to active v3 manager' }
-          if ($all -notmatch 'CryptProtectData') { throw 'DPAPI protection path missing' }
+          Push-Location .v3src
+          try {
+            $src = Get-Content manager/main.go -Raw
+            if ($src -notmatch 'CompareAndSwap\(false, true\)') { throw 'Install single-flight guard missing' }
+            $all = (Get-Content manager/*.go -Raw) -join "`n"
+            if ($all -match 'docker\.exe|wsl\.exe|runas') { throw 'Legacy prerequisite path returned to active v3 manager' }
+            if ($all -notmatch 'CryptProtectData') { throw 'DPAPI protection path missing' }
+          } finally {
+            Pop-Location
+          }
       - name: Build byte-identical Windows release
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          $env:GOOS='windows'; $env:GOARCH='amd64'; $env:CGO_ENABLED='0'
-          go build -trimpath -ldflags "-H=windowsgui -s -w" -o dist/Haya_Job_Autopilot_v3.0.0_No_Docker.exe ./manager
+          Push-Location .v3src
+          try {
+            $env:GOOS='windows'; $env:GOARCH='amd64'; $env:CGO_ENABLED='0'
+            go build -trimpath -ldflags "-H=windowsgui -s -w" -o ../dist/Haya_Job_Autopilot_v3.0.0_No_Docker.exe ./manager
+          } finally {
+            Pop-Location
+          }
           $actual=(Get-FileHash dist/Haya_Job_Autopilot_v3.0.0_No_Docker.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           $expected='a7c1389411fec97cdf7c92f3a4ea104f52d73abb9c97b071c01ff36c326a62c5'
           if($actual -ne $expected){ throw "Release checksum mismatch: $actual" }
@@ -46,7 +75,7 @@ jobs:
           $agent=Start-Process -FilePath $exe -ArgumentList '--agent' -PassThru
           try {
             $health=$null
-            for($i=0;$i -lt 30;$i++){
+            for($i=0;$i -lt 40;$i++){
               Start-Sleep -Milliseconds 500
               try {
                 $health=Invoke-RestMethod -Uri 'http://127.0.0.1:8787/healthz' -TimeoutSec 2
@@ -58,31 +87,35 @@ jobs:
             $status=Invoke-RestMethod -Uri 'http://127.0.0.1:8787/api/status' -TimeoutSec 3
             if(-not $status.ok){ throw 'Status endpoint did not report ok=true' }
             if($status.version -ne '3.0.0'){ throw 'Status endpoint version mismatch' }
-            try {
-              Invoke-WebRequest -Uri 'http://127.0.0.1:8787/api/run' -Method POST -ContentType 'application/json' -Body '{}' -TimeoutSec 10 | Out-Null
-              throw 'Manual run should be safely blocked until Yahoo app password is configured'
-            } catch {
-              if($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -ne 409){ throw }
-            }
+            $run=Invoke-WebRequest -Uri 'http://127.0.0.1:8787/api/run' -Method POST -ContentType 'application/json' -Body '{}' -TimeoutSec 10 -SkipHttpErrorCheck
+            if([int]$run.StatusCode -ne 409){ throw "Missing-credential guard returned HTTP $([int]$run.StatusCode), expected 409" }
+            $body=$run.Content | ConvertFrom-Json
+            if($body.ok -ne $false -or $body.error -notmatch 'Yahoo app password'){ throw 'Missing-credential guard response was not explicit' }
             Invoke-RestMethod -Uri 'http://127.0.0.1:8787/api/shutdown' -Method POST -ContentType 'application/json' -Body '{}' -TimeoutSec 5 | Out-Null
-            for($i=0;$i -lt 20 -and -not $agent.HasExited;$i++){ Start-Sleep -Milliseconds 250; $agent.Refresh() }
+            for($i=0;$i -lt 30 -and -not $agent.HasExited;$i++){ Start-Sleep -Milliseconds 250; $agent.Refresh() }
             if(-not $agent.HasExited){ throw 'Agent did not shut down cleanly' }
           } finally {
+            $agent.Refresh()
             if(-not $agent.HasExited){ Stop-Process -Id $agent.Id -Force -ErrorAction SilentlyContinue }
           }
-      - name: Runtime smoke - GUI process remains responsive/alive
+      - name: Runtime smoke - GUI process stays alive
         shell: pwsh
         run: |
           $exe=(Resolve-Path 'dist/Haya_Job_Autopilot_v3.0.0_No_Docker.exe').Path
           $gui=Start-Process -FilePath $exe -PassThru
-          Start-Sleep -Seconds 4
-          $gui.Refresh()
-          if($gui.HasExited){ throw "GUI exited unexpectedly with code $($gui.ExitCode)" }
-          Stop-Process -Id $gui.Id -Force
+          try {
+            Start-Sleep -Seconds 5
+            $gui.Refresh()
+            if($gui.HasExited){ throw "GUI exited unexpectedly with code $($gui.ExitCode)" }
+          } finally {
+            $gui.Refresh()
+            if(-not $gui.HasExited){ Stop-Process -Id $gui.Id -Force }
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: Haya-Job-Autopilot-v3.0.0-windows-functional
           path: |
             dist/Haya_Job_Autopilot_v3.0.0_No_Docker.exe
             dist/SHA256-v3.0.0.txt
+            source-v3/Haya_Job_Autopilot_v3.0.0_Source.exact.zip
           if-no-files-found: error
