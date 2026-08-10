@@ -89,4 +89,4 @@ jobs:
             --clobber
       - name: Verify published assets
         run: |
-          gh release view "$RELEASE_TAG" --json url,tagName,isLatest,assets
+          gh release view "$RELEASE_TAG" --json url,tagName,assets --jq '{url:.url,tagName:.tagName,assets:[.assets[].name]}'
