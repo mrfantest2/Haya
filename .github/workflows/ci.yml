@@ -1,4 +1,4 @@
-name: Build and validate v3
+name: Build and validate v3.0.0
 
 on:
   push:
@@ -16,29 +16,22 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23.x'
-      - name: Verify authoritative source archive
-        run: |
-          sha256sum -c source-v3/SHA256.txt
-          rm -rf .v3src
-          mkdir .v3src
-          unzip -q source-v3/Haya_Job_Autopilot_v3.0.0_Source.zip -d .v3src
+          go-version: '1.23.2'
+          cache: false
       - name: Validate profile JSON
-        working-directory: .v3src
         run: |
           python - <<'PY'
           import json
           for p in ['config/haya_profile.json','config/private_answers.template.json','manager/resources/haya_profile.json']:
-              with open(p, encoding='utf-8') as f: json.load(f)
+              with open(p, encoding='utf-8') as f:
+                  json.load(f)
               print('PASS', p)
           PY
       - name: Validate embedded CV
-        working-directory: .v3src
         run: |
           test -s manager/resources/Haya_Saadeh_CV.pdf
           head -c 4 manager/resources/Haya_Saadeh_CV.pdf | grep -q '%PDF'
       - name: Regression guards
-        working-directory: .v3src
         run: |
           grep -q 'CompareAndSwap(false, true)' manager/main.go
           grep -q 'HayaJobAutopilotManagerV3' manager/main.go
@@ -48,25 +41,25 @@ jobs:
           ! grep -q 'wsl.exe' manager/*.go
           ! grep -q 'runas' manager/*.go
       - name: Vet Windows source
-        working-directory: .v3src
         env:
           GOOS: windows
           GOARCH: amd64
           CGO_ENABLED: '0'
         run: go vet -unsafeptr=false ./manager
-      - name: Build Windows manager
-        working-directory: .v3src
+      - name: Build exact frozen Windows release
         env:
           GOOS: windows
           GOARCH: amd64
           CGO_ENABLED: '0'
         run: |
-          go build -trimpath -ldflags='-H=windowsgui -s -w' -o ../Haya_Job_Autopilot_Manager_v3.0.0.exe ./manager
-          sha256sum ../Haya_Job_Autopilot_Manager_v3.0.0.exe > ../SHA256-v3.0.0.txt
+          mkdir -p dist
+          go build -trimpath -ldflags='-H=windowsgui -s -w' -o dist/Haya_Job_Autopilot_v3.0.0_No_Docker.exe ./manager
+          echo 'a7c1389411fec97cdf7c92f3a4ea104f52d73abb9c97b071c01ff36c326a62c5  dist/Haya_Job_Autopilot_v3.0.0_No_Docker.exe' | sha256sum -c -
+          sha256sum dist/Haya_Job_Autopilot_v3.0.0_No_Docker.exe > dist/SHA256-v3.0.0.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: Haya-Job-Autopilot-v3.0.0
+          name: Haya-Job-Autopilot-v3.0.0-linux-verified-build
           path: |
-            Haya_Job_Autopilot_Manager_v3.0.0.exe
-            SHA256-v3.0.0.txt
+            dist/Haya_Job_Autopilot_v3.0.0_No_Docker.exe
+            dist/SHA256-v3.0.0.txt
           if-no-files-found: error
