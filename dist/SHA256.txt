@@ -1,1 +1,1 @@
-4ebb1a1fa9573081ed3c0bbfcb018e2acbe9b2743f1bbe9d5eaecf5015c940d6  dist/Haya_Job_Autopilot_Manager.exe
+900f4602e05e02610ede584ba1703dce94295a8c530486fd4504308c869d1207  Haya_Job_Autopilot_Manager_v2.0.2.exe
