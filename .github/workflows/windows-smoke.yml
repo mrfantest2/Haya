@@ -17,8 +17,17 @@ jobs:
       - name: Reconstruct exact frozen source
         shell: pwsh
         run: |
-          $parts = 0..6 | ForEach-Object { "source-v3\parts\part{0:d2}" -f $_ }
-          $zip = "source-v3\Haya_Job_Autopilot_v3.0.0_Source.exact.zip"
+          $parts = @(
+            'source-v3\parts\part00',
+            'source-v3\parts\part01',
+            'source-v3\parts\part02',
+            'source-v3\parts\part03',
+            'source-v3\parts\part04a',
+            'source-v3\parts\part04b',
+            'source-v3\parts\part05',
+            'source-v3\parts\part06'
+          )
+          $zip = 'source-v3\Haya_Job_Autopilot_v3.0.0_Source.exact.zip'
           $dest = [System.IO.File]::Open($zip, [System.IO.FileMode]::Create)
           try {
             foreach($part in $parts) {
