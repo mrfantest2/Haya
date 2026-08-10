@@ -14,11 +14,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Reconstruct exact frozen source
+        run: |
+          cat source-v3/parts/part00 \
+              source-v3/parts/part01 \
+              source-v3/parts/part02 \
+              source-v3/parts/part03 \
+              source-v3/parts/part04 \
+              source-v3/parts/part05 \
+              source-v3/parts/part06 \
+              > source-v3/Haya_Job_Autopilot_v3.0.0_Source.exact.zip
+          echo 'f6e400144dafad0b7f19a3b30edfcb6fdfbc23d0ed17c4c8142b6de1fc5027f1  source-v3/Haya_Job_Autopilot_v3.0.0_Source.exact.zip' | sha256sum -c -
+          rm -rf .v3src
+          mkdir .v3src
+          unzip -q source-v3/Haya_Job_Autopilot_v3.0.0_Source.exact.zip -d .v3src
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23.2'
           cache: false
       - name: Validate profile JSON
+        working-directory: .v3src
         run: |
           python - <<'PY'
           import json
@@ -28,10 +43,12 @@ jobs:
               print('PASS', p)
           PY
       - name: Validate embedded CV
+        working-directory: .v3src
         run: |
           test -s manager/resources/Haya_Saadeh_CV.pdf
           head -c 4 manager/resources/Haya_Saadeh_CV.pdf | grep -q '%PDF'
       - name: Regression guards
+        working-directory: .v3src
         run: |
           grep -q 'CompareAndSwap(false, true)' manager/main.go
           grep -q 'HayaJobAutopilotManagerV3' manager/main.go
@@ -41,12 +58,14 @@ jobs:
           ! grep -q 'wsl.exe' manager/*.go
           ! grep -q 'runas' manager/*.go
       - name: Vet Windows source
+        working-directory: .v3src
         env:
           GOOS: windows
           GOARCH: amd64
           CGO_ENABLED: '0'
         run: go vet -unsafeptr=false ./manager
       - name: Build exact frozen Windows release
+        working-directory: .v3src
         env:
           GOOS: windows
           GOARCH: amd64
@@ -60,6 +79,7 @@ jobs:
         with:
           name: Haya-Job-Autopilot-v3.0.0-linux-verified-build
           path: |
-            dist/Haya_Job_Autopilot_v3.0.0_No_Docker.exe
-            dist/SHA256-v3.0.0.txt
+            .v3src/dist/Haya_Job_Autopilot_v3.0.0_No_Docker.exe
+            .v3src/dist/SHA256-v3.0.0.txt
+            source-v3/Haya_Job_Autopilot_v3.0.0_Source.exact.zip
           if-no-files-found: error
