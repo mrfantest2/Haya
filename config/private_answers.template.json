@@ -1,0 +1,8 @@
+{
+  "work_authorization_hungary": "REQUIRED",
+  "sponsorship_required": "REQUIRED",
+  "earliest_start_date": "REQUIRED",
+  "minimum_gross_monthly_salary_huf": "",
+  "daily_application_limit": 5,
+  "auto_email_apply": false
+}

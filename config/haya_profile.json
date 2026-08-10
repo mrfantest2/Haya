@@ -1,0 +1,45 @@
+{
+  "name": "Haya Saadeh",
+  "location": "Budapest, Hungary",
+  "phone": "+36 70 345 8474",
+  "email": "saadehhaya@yahoo.com",
+  "linkedin": "https://linkedin.com/in/haya-saadeh",
+  "headline": "Training Administration & Programme Coordination | MBA Candidate, Corvinus University of Budapest",
+  "availability": {
+    "minimum_hours_weekly": 20,
+    "maximum_hours_weekly_during_study": 30,
+    "work_modes": ["On-site", "Hybrid"]
+  },
+  "languages": {
+    "Arabic": "Native",
+    "English": "Advanced C1",
+    "Hungarian": "Beginner"
+  },
+  "priority_roles": [
+    "Training Coordinator",
+    "Training Administrator",
+    "Programme Coordinator",
+    "Operations Coordinator",
+    "Recruitment Coordinator",
+    "Talent Acquisition Coordinator",
+    "HR Coordinator",
+    "People Operations Coordinator",
+    "Airline Operations Coordinator",
+    "Travel Consultant",
+    "Patient Care Coordinator",
+    "International Student Coordinator"
+  ],
+  "skills": [
+    "Recruitment coordination",
+    "Training programme administration",
+    "Onboarding",
+    "Documentation",
+    "Calendar and milestone management",
+    "Reporting and data organisation",
+    "Stakeholder communication",
+    "Microsoft Office",
+    "Process improvement",
+    "Galileo GDS",
+    "Amadeus GDS"
+  ]
+}

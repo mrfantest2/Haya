@@ -1,0 +1,9 @@
+.env
+data/
+applications/
+logs/
+documents/*.pdf
+!docs/Haya_Saadeh_CV.pdf
+*.exe
+!dist/Haya_Job_Autopilot_Manager.exe
+manager/payload.zip

@@ -1,0 +1,68 @@
+name: Build and validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate agent dependencies and syntax
+        working-directory: agent
+        run: |
+          npm install --ignore-scripts --no-audit --no-fund
+          node --check server.js
+      - name: Validate JSON configuration
+        run: |
+          python -m json.tool config/haya_profile.json >/dev/null
+          python -m json.tool config/private_answers.template.json >/dev/null
+      - name: Installer popup-loop regression guards
+        run: |
+          grep -F 'CompareAndSwap(false, true)' manager/main.go
+          grep -F 'HayaJobAutopilot-DockerInstall.lock' manager/main.go
+          grep -F 'HayaJobAutopilotManagerSingleInstance' manager/main.go
+          grep -F 'case ID_INSTALL:' manager/main.go
+          grep -F 'startInstall()' manager/main.go
+          python - <<'PY'
+          from pathlib import Path
+          s = Path('manager/main.go').read_text()
+          block = s[s.index('func startInstall()'):s.index('func busy(', s.index('func startInstall()'))]
+          assert 'msg:' not in block, 'install path must not post modal MessageBox errors'
+          assert 'installing.CompareAndSwap(false, true)' in block
+          print('popup-loop regression guards PASS')
+          PY
+      - name: Build embedded payload
+        run: python scripts/build_payload.py
+      - name: Build Windows manager
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: '0'
+        run: |
+          mkdir -p dist
+          go build -trimpath -ldflags='-H=windowsgui -s -w' -o dist/Haya_Job_Autopilot_Manager.exe ./manager
+          file dist/Haya_Job_Autopilot_Manager.exe | tee dist/FILE_TYPE.txt
+          grep -q 'PE32+ executable' dist/FILE_TYPE.txt
+          sha256sum dist/Haya_Job_Autopilot_Manager.exe | tee dist/SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Haya-Job-Autopilot-Manager-Windows-x64
+          path: |
+            dist/Haya_Job_Autopilot_Manager.exe
+            dist/SHA256.txt
+            dist/FILE_TYPE.txt
+          if-no-files-found: error
+          retention-days: 30

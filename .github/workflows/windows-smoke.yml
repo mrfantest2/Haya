@@ -1,0 +1,47 @@
+name: Windows smoke build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'manager/**'
+      - 'scripts/build_payload.py'
+      - 'agent/**'
+      - 'config/**'
+      - 'Dockerfile'
+      - 'docker-compose.yml'
+      - '.github/workflows/windows-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  windows-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Build payload
+        run: python scripts/build_payload.py
+      - name: Build native GUI
+        shell: pwsh
+        run: |
+          $env:GOOS='windows'
+          $env:GOARCH='amd64'
+          $env:CGO_ENABLED='0'
+          New-Item -ItemType Directory -Force dist | Out-Null
+          go build -trimpath -ldflags '-H=windowsgui -s -w' -o dist/Haya_Job_Autopilot_Manager.exe ./manager
+          if (!(Test-Path dist/Haya_Job_Autopilot_Manager.exe)) { throw 'Manager EXE missing' }
+          Get-FileHash dist/Haya_Job_Autopilot_Manager.exe -Algorithm SHA256 | Format-List | Out-File dist/windows-sha256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Haya-Manager-Windows-Smoke
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
