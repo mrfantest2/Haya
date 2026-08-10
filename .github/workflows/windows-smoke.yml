@@ -10,77 +10,83 @@ permissions:
   contents: read
 
 jobs:
-  windows-functional:
-    runs-on: windows-latest
+  build-frozen-release:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Reconstruct exact frozen source
-        shell: pwsh
         run: |
-          $parts = @(
-            'source-v3\parts\part00',
-            'source-v3\parts\part01',
-            'source-v3\parts\part02',
-            'source-v3\parts\part03',
-            'source-v3\parts\part04a',
-            'source-v3\parts\part04b',
-            'source-v3\parts\part05',
-            'source-v3\parts\part06'
-          )
-          $zip = 'source-v3\Haya_Job_Autopilot_v3.0.0_Source.exact.zip'
-          $dest = [System.IO.File]::Open($zip, [System.IO.FileMode]::Create)
-          try {
-            foreach($part in $parts) {
-              $bytes = [System.IO.File]::ReadAllBytes($part)
-              $dest.Write($bytes, 0, $bytes.Length)
-            }
-          } finally {
-            $dest.Dispose()
-          }
-          $actual = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          $expected = 'f6e400144dafad0b7f19a3b30edfcb6fdfbc23d0ed17c4c8142b6de1fc5027f1'
-          if($actual -ne $expected) { throw "Frozen source checksum mismatch: $actual" }
-          Remove-Item .v3src -Recurse -Force -ErrorAction SilentlyContinue
-          Expand-Archive -LiteralPath $zip -DestinationPath .v3src -Force
+          cat source-v3/parts/part00 \
+              source-v3/parts/part01 \
+              source-v3/parts/part02 \
+              source-v3/parts/part03 \
+              source-v3/parts/part04a \
+              source-v3/parts/part04b \
+              source-v3/parts/part05 \
+              source-v3/parts/part06 \
+              > Haya_Job_Autopilot_v3.0.0_Source.exact.zip
+          echo 'f6e400144dafad0b7f19a3b30edfcb6fdfbc23d0ed17c4c8142b6de1fc5027f1  Haya_Job_Autopilot_v3.0.0_Source.exact.zip' | sha256sum -c -
+          mkdir .v3src
+          unzip -q Haya_Job_Autopilot_v3.0.0_Source.exact.zip -d .v3src
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23.2'
           cache: false
       - name: Static v3 guards
+        working-directory: .v3src
+        run: |
+          grep -q 'CompareAndSwap(false, true)' manager/main.go
+          grep -q 'HayaJobAutopilotManagerV3' manager/main.go
+          grep -q 'HayaJobAutopilotAgentV3' manager/agent.go
+          grep -q 'CryptProtectData' manager/windows.go
+          ! grep -q 'docker.exe' manager/*.go
+          ! grep -q 'wsl.exe' manager/*.go
+          ! grep -q 'runas' manager/*.go
+      - name: Build exact frozen Windows release
+        working-directory: .v3src
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: '0'
+        run: |
+          mkdir -p ../candidate
+          go build -trimpath -ldflags='-H=windowsgui -s -w' -o ../candidate/Haya_Job_Autopilot_v3.0.0_No_Docker.exe ./manager
+          echo 'a7c1389411fec97cdf7c92f3a4ea104f52d73abb9c97b071c01ff36c326a62c5  ../candidate/Haya_Job_Autopilot_v3.0.0_No_Docker.exe' | sha256sum -c -
+          sha256sum ../candidate/Haya_Job_Autopilot_v3.0.0_No_Docker.exe > ../candidate/SHA256-v3.0.0.txt
+          cp ../Haya_Job_Autopilot_v3.0.0_Source.exact.zip ../candidate/Haya_Job_Autopilot_v3.0.0_Source.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v3.0.0-exact-frozen-candidate
+          path: candidate/
+          if-no-files-found: error
+          retention-days: 30
+
+  windows-functional:
+    needs: build-frozen-release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: v3.0.0-exact-frozen-candidate
+          path: candidate
+      - name: Verify exact release artifact
         shell: pwsh
         run: |
-          Push-Location .v3src
-          try {
-            $src = Get-Content manager/main.go -Raw
-            if ($src -notmatch 'CompareAndSwap\(false, true\)') { throw 'Install single-flight guard missing' }
-            $all = (Get-Content manager/*.go -Raw) -join "`n"
-            if ($all -match 'docker\.exe|wsl\.exe|runas') { throw 'Legacy prerequisite path returned to active v3 manager' }
-            if ($all -notmatch 'CryptProtectData') { throw 'DPAPI protection path missing' }
-          } finally {
-            Pop-Location
-          }
-      - name: Build byte-identical Windows release
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force dist | Out-Null
-          Push-Location .v3src
-          try {
-            $env:GOOS='windows'; $env:GOARCH='amd64'; $env:CGO_ENABLED='0'
-            go build -trimpath -ldflags "-H=windowsgui -s -w" -o ../dist/Haya_Job_Autopilot_v3.0.0_No_Docker.exe ./manager
-          } finally {
-            Pop-Location
-          }
-          $actual=(Get-FileHash dist/Haya_Job_Autopilot_v3.0.0_No_Docker.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $exe='candidate\Haya_Job_Autopilot_v3.0.0_No_Docker.exe'
+          $actual=(Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           $expected='a7c1389411fec97cdf7c92f3a4ea104f52d73abb9c97b071c01ff36c326a62c5'
-          if($actual -ne $expected){ throw "Release checksum mismatch: $actual" }
-          "$actual  Haya_Job_Autopilot_v3.0.0_No_Docker.exe" | Set-Content dist/SHA256-v3.0.0.txt
+          if($actual -ne $expected){ throw "Downloaded release checksum mismatch: $actual" }
+          $src='candidate\Haya_Job_Autopilot_v3.0.0_Source.zip'
+          $srcActual=(Get-FileHash $src -Algorithm SHA256).Hash.ToLowerInvariant()
+          $srcExpected='f6e400144dafad0b7f19a3b30edfcb6fdfbc23d0ed17c4c8142b6de1fc5027f1'
+          if($srcActual -ne $srcExpected){ throw "Downloaded source checksum mismatch: $srcActual" }
       - name: Runtime smoke - hidden agent and local dashboard
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           $appData=Join-Path $env:LOCALAPPDATA 'HayaJobAutopilot'
           Remove-Item $appData -Recurse -Force -ErrorAction SilentlyContinue
-          $exe=(Resolve-Path 'dist/Haya_Job_Autopilot_v3.0.0_No_Docker.exe').Path
+          $exe=(Resolve-Path 'candidate\Haya_Job_Autopilot_v3.0.0_No_Docker.exe').Path
           $agent=Start-Process -FilePath $exe -ArgumentList '--agent' -PassThru
           try {
             $health=$null
@@ -101,7 +107,10 @@ jobs:
             $body=$run.Content | ConvertFrom-Json
             if($body.ok -ne $false -or $body.error -notmatch 'Yahoo app password'){ throw 'Missing-credential guard response was not explicit' }
             Invoke-RestMethod -Uri 'http://127.0.0.1:8787/api/shutdown' -Method POST -ContentType 'application/json' -Body '{}' -TimeoutSec 5 | Out-Null
-            for($i=0;$i -lt 30 -and -not $agent.HasExited;$i++){ Start-Sleep -Milliseconds 250; $agent.Refresh() }
+            for($i=0;$i -lt 30 -and -not $agent.HasExited;$i++){
+              Start-Sleep -Milliseconds 250
+              $agent.Refresh()
+            }
             if(-not $agent.HasExited){ throw 'Agent did not shut down cleanly' }
           } finally {
             $agent.Refresh()
@@ -110,7 +119,7 @@ jobs:
       - name: Runtime smoke - GUI process stays alive
         shell: pwsh
         run: |
-          $exe=(Resolve-Path 'dist/Haya_Job_Autopilot_v3.0.0_No_Docker.exe').Path
+          $exe=(Resolve-Path 'candidate\Haya_Job_Autopilot_v3.0.0_No_Docker.exe').Path
           $gui=Start-Process -FilePath $exe -PassThru
           try {
             Start-Sleep -Seconds 5
@@ -123,8 +132,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: Haya-Job-Autopilot-v3.0.0-windows-functional
-          path: |
-            dist/Haya_Job_Autopilot_v3.0.0_No_Docker.exe
-            dist/SHA256-v3.0.0.txt
-            source-v3/Haya_Job_Autopilot_v3.0.0_Source.exact.zip
+          path: candidate/
           if-no-files-found: error
