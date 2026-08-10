@@ -4,7 +4,7 @@ Private Windows job-search and strict auto-application system for **Haya Saadeh*
 
 ## Current baseline
 
-- Manager: **v2.0.1**
+- Manager: **v2.0.2**
 - Windows: x64 native Win32 single-file manager
 - Agent: Node.js 22 + Docker
 - Dashboard: `http://127.0.0.1:8787`
@@ -13,20 +13,23 @@ Private Windows job-search and strict auto-application system for **Haya Saadeh*
 - Automatic submission route: verified corporate email only
 - CAPTCHAs, assessments, platform bot restrictions, and unknown legal answers are never bypassed.
 
-## Why v2.0.1 exists
+## v2.0.2 installer hardening
 
-Older experimental managers had two Windows UI defects:
+The final manager uses one always-visible three-column interface:
 
-1. A resize/maximize path could block the Win32 message thread.
-2. A sidebar/page architecture could leave the selected content panel hidden.
+1. **Install / Repair**
+2. **Private details**
+3. **Run / Manage / Uninstall**
 
-v2.0 removed both designs. v2.0.1 also hardens the installer against repeated elevation/error prompts by enforcing one manager instance and one Docker/WSL installation flight at a time. The manager now uses a **single always-visible three-column wizard**:
+The installer specifically protects against the previously observed repeated popup/UAC loop:
 
-- Step 1: Install / Repair
-- Step 2: Private details
-- Step 3: Run / Manage + Uninstall
+- native single-manager Windows mutex;
+- atomic Install single-flight guard;
+- cross-process `%TEMP%\HayaJobAutopilot-DockerInstall.lock`;
+- no modal install-error loop;
+- only one elevated prerequisite process can be active at a time.
 
-All Docker, WSL, HTTP, PowerShell, and agent operations execute in background goroutines with timeouts. `WM_SIZE` performs geometry only.
+All Docker, WSL, HTTP, PowerShell, and agent operations execute outside the Win32 UI thread. `WM_SIZE` performs geometry only, so resizing/maximizing does not run prerequisite checks or Docker commands.
 
 ## Repository layout
 
@@ -35,14 +38,14 @@ manager/                 Native Windows manager source
 agent/                   Automatic job agent and local dashboard
 config/                  Haya profile and private-answer template
 docs/                    CV and project documentation
-scripts/build_payload.py Reproducible manager payload builder
+scripts/build_payload.py Reproducible embedded-payload builder
 Dockerfile               Agent image
 docker-compose.yml       Local deployment
-dist/                    Verified Windows manager build
+dist/SHA256.txt          Verified local Windows-build checksum
 .github/workflows/        CI/build/debug automation
 ```
 
-## Build
+## Reproducible build
 
 ```bash
 python scripts/build_payload.py
@@ -53,16 +56,20 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build \
 
 ## Security model
 
-The repository contains no Yahoo app password and no completed work-authorization answers. The manager writes those values only to the local `.env`, which is gitignored. The normal Yahoo password is never requested.
+The repository contains no Yahoo app password and no completed work-authorization answers. The manager writes those values only to the local `.env`, which is gitignored. Haya's normal Yahoo password is never requested.
 
-The manager downloads Docker Desktop only from Docker's official Windows endpoint and checks its Authenticode signature before silent installation.
+Docker Desktop is downloaded only from Docker's official Windows endpoint and its Authenticode signer is validated before silent installation.
 
 ## Runtime flow
 
-1. Manager extracts the embedded agent into `%LOCALAPPDATA%\HayaJobAutopilot`.
-2. It enables WSL 2 if necessary and installs Docker Desktop if missing.
+1. The manager extracts the embedded agent into `%LOCALAPPDATA%\HayaJobAutopilot`.
+2. It prepares WSL 2 and installs Docker Desktop if required.
 3. Docker Compose starts the agent on `127.0.0.1:8787`.
 4. The agent reads job-alert emails, extracts vacancy links, scores them against Haya's profile, applies fraud-risk checks, prepares tailored application text, deduplicates results, and tracks status.
 5. Strict verified-email auto-apply is permitted only when all required private answers exist and the vacancy passes the configured thresholds.
 
-See [docs/DEBUGGING.md](docs/DEBUGGING.md) for diagnostics and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the system design.
+## Validation status
+
+The v2.0.2 source passes local Go cross-compilation to a Windows x64 GUI executable, Node syntax validation, JSON validation, and anti-popup regression assertions. GitHub Actions workflows are committed, but GitHub currently refuses to start hosted runners for this private repository because the account reports a billing/spending-limit problem. See `docs/CI_STATUS.md`.
+
+See [docs/DEBUGGING.md](docs/DEBUGGING.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md).
