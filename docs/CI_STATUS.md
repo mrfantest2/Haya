@@ -14,16 +14,19 @@ This is an account-level GitHub Actions runner/billing condition, not a source c
 
 ## Local release validation
 
-The v2.0.2 release was validated outside GitHub-hosted Actions with:
+The final v2.0.2 release was validated outside GitHub-hosted Actions with:
 
 - embedded payload generation: PASS
 - `node --check agent/server.js`: PASS
 - `config/haya_profile.json`: valid JSON
 - `config/private_answers.template.json`: valid JSON
-- anti-popup regression assertions: PASS
+- native single-manager mutex regression guard: PASS
+- atomic Install single-flight regression guard: PASS
+- cross-process Docker installer lock regression guard: PASS
+- non-modal Install error path regression guard: PASS
 - Go cross-build for `windows/amd64`: PASS
 - output format: PE32+ Windows GUI x86-64
-- installer SHA-256: `900f4602e05e02610ede584ba1703dce94295a8c530486fd4504308c869d1207`
+- final installer SHA-256: `40184f50c44fdf2c5cb0ae3e261eea65fe785d437c4203b192d7fa72206182c4`
 
 ## To restore GitHub CI
 
