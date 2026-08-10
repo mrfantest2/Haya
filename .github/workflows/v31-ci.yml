@@ -10,9 +10,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: v31-webview-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows-functional:
     runs-on: windows-latest
+    timeout-minutes: 20
     env:
       WAILS_VERSION: v2.13.0
       CANDIDATE_EXE: Haya_Job_Autopilot_v3.1.0_DEV.exe
@@ -85,11 +90,24 @@ jobs:
         shell: pwsh
         run: go vet -tags=wails -unsafeptr=false ./manager
 
-      - name: Build embedded WebView2 candidate
+      - name: Build WebView2 candidate with fail-fast diagnostics
         shell: pwsh
         run: |
+          $ErrorActionPreference='Stop'
           Push-Location .v31src\manager
-          try { wails build -s -clean -webview2 embed -tags wails -trimpath -o $env:CANDIDATE_EXE } finally { Pop-Location }
+          try {
+            $job=Start-Job -ScriptBlock {
+              param($exe)
+              wails build -v 2 -s -clean -webview2 download -tags wails -trimpath -o $exe
+            } -ArgumentList $env:CANDIDATE_EXE
+            if(-not (Wait-Job $job -Timeout 240)){
+              Stop-Job $job -ErrorAction SilentlyContinue
+              Receive-Job $job -Keep | Write-Host
+              throw 'Wails build exceeded four minutes'
+            }
+            Receive-Job $job
+            if($job.State -ne 'Completed'){throw "Wails build state: $($job.State)"}
+          } finally { Pop-Location }
           $built=Join-Path '.v31src\manager\build\bin' $env:CANDIDATE_EXE
           if(-not (Test-Path $built)){ throw "Wails output missing: $built" }
           Copy-Item $built (Join-Path 'dist' $env:CANDIDATE_EXE) -Force
@@ -153,7 +171,10 @@ jobs:
               try{$health=Invoke-RestMethod 'http://127.0.0.1:8787/healthz' -TimeoutSec 2;if($health.ok){break}}catch{}
             }
             if(-not $health -or -not $health.ok){throw 'One-click WebView launcher did not leave agent online'}
-            $installed=Join-Path $appData 'Haya Job Autopilot.exe'
+            $installed=Join-Path $appData 'HayaJobAutopilot.exe'
+            if(-not (Test-Path $installed)){
+              $installed=Join-Path $appData 'Haya Job Autopilot.exe'
+            }
             if(-not (Test-Path $installed)){throw 'Installed EXE missing after one-click launch'}
             Start-Sleep -Seconds 3
             $ui.Refresh()
