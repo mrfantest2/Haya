@@ -1,9 +1,17 @@
-.env
+# Runtime state and private local data
 data/
 applications/
 logs/
-documents/*.pdf
-!docs/Haya_Saadeh_CV.pdf
+*.bak
+
+# Local binaries (GitHub Actions publishes build artifacts)
 *.exe
-!dist/Haya_Job_Autopilot_Manager.exe
-manager/payload.zip
+
+# Temporary extracted authoritative source
+.v3src/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -4,5 +4,10 @@
   "earliest_start_date": "REQUIRED",
   "minimum_gross_monthly_salary_huf": "",
   "daily_application_limit": 5,
-  "auto_email_apply": false
+  "automation_mode": "Prepare & Ask",
+  "minimum_match_score": 80,
+  "maximum_fraud_risk": 20,
+  "maximum_weekly_hours": 30,
+  "scan_interval_hours": 6,
+  "yahoo_app_password": "ENCRYPTED LOCALLY WITH WINDOWS DPAPI - NEVER COMMIT"
 }
