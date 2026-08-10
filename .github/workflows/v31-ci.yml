@@ -23,9 +23,10 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $parts=Get-ChildItem 'source-v3.1\webview2-parts\part*' | Sort-Object Name
-          if($parts.Count -ne 14){throw "Expected 14 source parts, got $($parts.Count)"}
-          $base64=($parts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ''
+          $root='source-v3.1\webview2-parts'
+          $names=@('part00','part01','part02','part03','part04','part05a','part05b','part06','part07a','part07b','part08','part09','part10','part11','part12','part13')
+          foreach($name in $names){if(-not (Test-Path (Join-Path $root $name))){throw "Missing verified source piece $name"}}
+          $base64=($names | ForEach-Object { (Get-Content (Join-Path $root $_) -Raw).Trim() }) -join ''
           [IO.File]::WriteAllBytes('v31-source.zip',[Convert]::FromBase64String($base64))
           $actual=(Get-FileHash 'v31-source.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
           $expected='866fa7fea338ba578e5d3acceed2e705c810c3fb9e252fc5e220309e168a504b'
