@@ -1,33 +1,26 @@
 # CI status
 
-## Current repository state
+## v3.0.0 source state
 
-The source, build workflows, Windows smoke workflow, Docker agent, documentation, and Haya CV are committed to `main`.
-
-## Hosted-runner blocker
-
-GitHub Actions detected both workflows after the v2.0.1/v2.0.2 source publication, but GitHub did not start the hosted jobs. GitHub's check annotation reports:
-
-> The job was not started because recent account payments have failed or your spending limit needs to be increased. Please check the 'Billing & plans' section in your settings.
-
-This is an account-level GitHub Actions runner/billing condition, not a source compilation failure.
+The exact No Docker v3.0.0 source archive and its SHA-256 are committed to `source-v3/`. The hosted workflows verify that archive before extracting and building it.
 
 ## Local release validation
 
-The final v2.0.2 release was validated outside GitHub-hosted Actions with:
+The v3.0.0 release has been validated outside GitHub-hosted Actions with:
 
-- embedded payload generation: PASS
-- `node --check agent/server.js`: PASS
-- `config/haya_profile.json`: valid JSON
-- `config/private_answers.template.json`: valid JSON
-- native single-manager mutex regression guard: PASS
-- atomic Install single-flight regression guard: PASS
-- cross-process Docker installer lock regression guard: PASS
-- non-modal Install error path regression guard: PASS
-- Go cross-build for `windows/amd64`: PASS
-- output format: PE32+ Windows GUI x86-64
-- final installer SHA-256: `40184f50c44fdf2c5cb0ae3e261eea65fe785d437c4203b192d7fa72206182c4`
+- authoritative source archive SHA-256: PASS
+- candidate/profile JSON validation: PASS
+- embedded CV `%PDF` validation: PASS
+- native manager mutex guard: PASS
+- atomic Install single-flight guard: PASS
+- Windows DPAPI credential-protection guard: PASS
+- active v3 source contains no Docker/WSL/elevation path: PASS
+- strict application-intent corporate-email gate: PASS
+- `GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go vet -unsafeptr=false ./manager`: PASS
+- Windows x64 GUI cross-build: PASS
+- third-party Go dependencies: none
+- installer SHA-256: `a7c1389411fec97cdf7c92f3a4ea104f52d73abb9c97b071c01ff36c326a62c5`
 
-## To restore GitHub CI
+## Hosted-runner blocker
 
-Resolve the GitHub account payment/spending-limit notice under Billing & plans, then re-run the failed Actions workflows. No source change is required solely for this runner-start failure.
+The account previously returned a GitHub Actions billing/spending-limit annotation before jobs could start. If that account-level condition remains, hosted jobs can still fail before executing any source step. That is distinct from a compile/test failure.
