@@ -10,7 +10,7 @@
 - Install/prerequisite failures remain in the in-app status panel instead of entering a modal popup loop.
 - One clean prerequisite install can generate at most one expected Windows UAC approval prompt at a time.
 - Local release validation: Go Windows x64 GUI build PASS, Node syntax PASS, JSON validation PASS, anti-popup regression assertions PASS.
-- Verified v2.0.2 Windows executable SHA-256: `900f4602e05e02610ede584ba1703dce94295a8c530486fd4504308c869d1207`.
+- Final verified v2.0.2 Windows executable SHA-256: `40184f50c44fdf2c5cb0ae3e261eea65fe785d437c4203b192d7fa72206182c4`.
 - GitHub Actions workflows are present but hosted runners are currently blocked by the GitHub account billing/spending-limit state; this is documented separately in `CI_STATUS.md`.
 
 ## v2.0.1
