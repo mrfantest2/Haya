@@ -2,7 +2,9 @@ name: v3.1 development validation
 
 on:
   push:
-    branches: [v3.1-dev]
+    branches: [v3.1-dev, v3.1-webview-staging]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -11,79 +13,163 @@ permissions:
 jobs:
   windows-functional:
     runs-on: windows-latest
+    env:
+      WAILS_VERSION: v2.13.0
+      CANDIDATE_EXE: Haya_Job_Autopilot_v3.1.0_DEV.exe
     steps:
       - uses: actions/checkout@v4
-      - name: Verify and extract v3.1 source
+
+      - name: Reconstruct and verify exact v3.1 WebView2 source
         shell: pwsh
         run: |
-          $zip='source-v3.1\Haya_Job_Autopilot_v3.1.0_DEV_Source.zip'
-          $actual=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          $expected='f8e2f2bbd0173e0fc96f616aa80b09e1a87e7355fecb655dba59606b5edbe0d6'
+          $ErrorActionPreference='Stop'
+          $parts=Get-ChildItem 'source-v3.1\webview2-parts\part*' | Sort-Object Name
+          if($parts.Count -ne 14){throw "Expected 14 source parts, got $($parts.Count)"}
+          $base64=($parts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ''
+          [IO.File]::WriteAllBytes('v31-source.zip',[Convert]::FromBase64String($base64))
+          $actual=(Get-FileHash 'v31-source.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
+          $expected='866fa7fea338ba578e5d3acceed2e705c810c3fb9e252fc5e220309e168a504b'
           if($actual -ne $expected){throw "v3.1 source checksum mismatch: $actual"}
-          Remove-Item .v31src -Recurse -Force -ErrorAction SilentlyContinue
-          Expand-Archive -LiteralPath $zip -DestinationPath .v31src -Force
+          Remove-Item '.v31src' -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive -LiteralPath 'v31-source.zip' -DestinationPath '.v31src' -Force
+
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23.2'
           cache: false
-      - name: Static safety guards
+
+      - name: Static safety and UX guards
         working-directory: .v31src
         shell: pwsh
         run: |
           $all=(Get-Content manager/*.go -Raw) -join "`n"
-          if($all -match 'docker\.exe|wsl\.exe|runas'){throw 'Legacy prerequisite path returned'}
-          if($all -notmatch 'CryptProtectData'){throw 'DPAPI protection missing'}
-          if($all -notmatch 'setupReadiness'){throw 'Readiness diagnostics missing'}
-          if($all -notmatch 'canonicalizeJobURL'){throw 'Canonical dedupe missing'}
+          if($all -match 'docker\.exe|wsl\.exe|runas'){ throw 'Legacy prerequisite path returned' }
+          if($all -notmatch 'CryptProtectData'){ throw 'DPAPI protection missing' }
+          if($all -notmatch 'canonicalizeJobURL'){ throw 'Canonical dedupe missing' }
+          if($all -notmatch 'SingleInstanceLock'){ throw 'Embedded WebView single-instance guard missing' }
+          if($all -notmatch 'assetserver\.Options'){ throw 'Wails embedded asset server missing' }
+          if($all -notmatch 'Yahoo app password is optional'){ throw 'Optional Yahoo behavior guard missing' }
+          if($all -match 'Work authorization answer missing'){ throw 'Work authorization still incorrectly blocks runtime' }
+          if(-not (Test-Path manager/wails.json)){ throw 'Wails project config missing' }
+          node --check manager/resources/app.js
+          Get-Content manager/wails.json -Raw | ConvertFrom-Json | Out-Null
+
       - name: Unit tests
         working-directory: .v31src
         shell: pwsh
         run: go test ./manager -run 'TestCanonicalizeJobURL|TestJobFingerprint' -v
-      - name: Vet Windows source
+
+      - name: Vet dependency-free fallback source
         working-directory: .v31src
         shell: pwsh
         run: go vet -unsafeptr=false ./manager
-      - name: Build development candidate
+
+      - name: Build dependency-free repair fallback
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
           Push-Location .v31src
-          try { go build -buildvcs=false -trimpath -ldflags "-H=windowsgui -s -w" -o ../dist/Haya_Job_Autopilot_v3.1.0_DEV.exe ./manager } finally { Pop-Location }
-          (Get-FileHash dist/Haya_Job_Autopilot_v3.1.0_DEV.exe -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content dist/SHA256-v3.1.0-dev.txt
-      - name: Runtime smoke - agent, diagnostics and safety gates
+          try { go build -buildvcs=false -trimpath -ldflags "-H=windowsgui -s -w" -o ../dist/Haya_Job_Autopilot_v3.1.0_FALLBACK.exe ./manager } finally { Pop-Location }
+
+      - name: Install pinned Wails v2 toolchain
+        working-directory: .v31src
+        shell: pwsh
+        run: |
+          go get "github.com/wailsapp/wails/v2@$env:WAILS_VERSION"
+          go install "github.com/wailsapp/wails/v2/cmd/wails@$env:WAILS_VERSION"
+          wails version
+
+      - name: Vet embedded WebView2 source
+        working-directory: .v31src
+        shell: pwsh
+        run: go vet -tags=wails -unsafeptr=false ./manager
+
+      - name: Build embedded WebView2 candidate
+        shell: pwsh
+        run: |
+          Push-Location .v31src\manager
+          try { wails build -s -clean -webview2 embed -tags wails -trimpath -o $env:CANDIDATE_EXE } finally { Pop-Location }
+          $built=Join-Path '.v31src\manager\build\bin' $env:CANDIDATE_EXE
+          if(-not (Test-Path $built)){ throw "Wails output missing: $built" }
+          Copy-Item $built (Join-Path 'dist' $env:CANDIDATE_EXE) -Force
+          (Get-FileHash (Join-Path 'dist' $env:CANDIDATE_EXE) -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content dist/SHA256-v3.1.0-dev.txt
+
+      - name: Runtime smoke - agent, optional setup and local API
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           $appData=Join-Path $env:LOCALAPPDATA 'HayaJobAutopilot'
           Remove-Item $appData -Recurse -Force -ErrorAction SilentlyContinue
-          $exe=(Resolve-Path 'dist/Haya_Job_Autopilot_v3.1.0_DEV.exe').Path
+          $exe=(Resolve-Path (Join-Path 'dist' $env:CANDIDATE_EXE)).Path
           $agent=Start-Process -FilePath $exe -ArgumentList '--agent' -PassThru
           try {
             $health=$null
-            for($i=0;$i -lt 40;$i++){Start-Sleep -Milliseconds 500;try{$health=Invoke-RestMethod 'http://127.0.0.1:8787/healthz' -TimeoutSec 2;if($health.ok){break}}catch{}}
+            for($i=0;$i -lt 40;$i++){
+              Start-Sleep -Milliseconds 500
+              try{$health=Invoke-RestMethod 'http://127.0.0.1:8787/healthz' -TimeoutSec 2;if($health.ok){break}}catch{}
+            }
             if(-not $health -or -not $health.ok){throw 'Agent health endpoint did not start'}
             if($health.version -ne '3.1.0-dev'){throw "Unexpected version $($health.version)"}
             $status=Invoke-RestMethod 'http://127.0.0.1:8787/api/status' -TimeoutSec 3
-            if($status.setupReady -ne $false){throw 'Fresh profile should not report setupReady=true'}
-            $diag=Invoke-RestMethod 'http://127.0.0.1:8787/api/diagnostics' -TimeoutSec 3
-            if(-not $diag.ok){throw 'Local diagnostics should pass on clean runtime'}
+            if($status.setupReady -ne $true){throw 'Fresh install should be core-ready without optional Yahoo/legal answers'}
+            if($status.yahooConfigured -ne $false){throw 'Fresh install unexpectedly has Yahoo configured'}
+            $cfg=Invoke-RestMethod 'http://127.0.0.1:8787/api/config' -TimeoutSec 3
+            if($cfg.yahooConfigured -ne $false){throw 'Config leaked unexpected Yahoo state'}
+            $cv=Invoke-RestMethod 'http://127.0.0.1:8787/api/cv' -TimeoutSec 3
+            if(-not $cv.present){throw 'Embedded CV missing'}
+            $html=(Invoke-WebRequest 'http://127.0.0.1:8787/' -TimeoutSec 3).Content
+            if($html -notmatch 'Profile &amp; CV|Profile & CV'){throw 'Simplified web UI not served'}
+            if($html -notmatch 'JOB DISCOVERY · OPTIONAL'){throw 'Yahoo optional wording missing'}
             $mail=Invoke-WebRequest 'http://127.0.0.1:8787/api/test-mail' -Method POST -ContentType 'application/json' -Body '{}' -SkipHttpErrorCheck -TimeoutSec 5
-            if([int]$mail.StatusCode -ne 409){throw "Mail safety gate expected 409, got $([int]$mail.StatusCode)"}
-            $run=Invoke-WebRequest 'http://127.0.0.1:8787/api/run' -Method POST -ContentType 'application/json' -Body '{}' -SkipHttpErrorCheck -TimeoutSec 5
-            if([int]$run.StatusCode -ne 409){throw "Run safety gate expected 409, got $([int]$run.StatusCode)"}
+            if([int]$mail.StatusCode -ne 409){throw "Explicit Yahoo test should require a credential; got $([int]$mail.StatusCode)"}
+            $run=Invoke-RestMethod 'http://127.0.0.1:8787/api/run' -Method POST -ContentType 'application/json' -Body '{}' -TimeoutSec 5
+            if(-not $run.ok -or -not $run.skippedMailbox){throw 'Manual-only run should succeed and skip Yahoo mailbox'}
+            $body=@{workAuthorizationHungary='';sponsorshipRequired='';earliestStartDate='';minimumGrossMonthlyHUF='';dailyApplicationLimit=5;automationMode='Prepare & Ask';minimumMatchScore=80;maximumFraudRisk=20}|ConvertTo-Json
+            $saved=Invoke-RestMethod 'http://127.0.0.1:8787/api/config' -Method POST -ContentType 'application/json' -Body $body -TimeoutSec 5
+            if(-not $saved.ok){throw 'Optional blank application answers failed to save'}
             Invoke-RestMethod 'http://127.0.0.1:8787/api/shutdown' -Method POST -ContentType 'application/json' -Body '{}' -TimeoutSec 5 | Out-Null
             for($i=0;$i -lt 30 -and -not $agent.HasExited;$i++){Start-Sleep -Milliseconds 250;$agent.Refresh()}
             if(-not $agent.HasExited){throw 'Agent did not shut down cleanly'}
-          } finally {$agent.Refresh();if(-not $agent.HasExited){Stop-Process -Id $agent.Id -Force -ErrorAction SilentlyContinue}}
-      - name: Runtime smoke - GUI stays alive
+          } finally {
+            $agent.Refresh()
+            if(-not $agent.HasExited){Stop-Process -Id $agent.Id -Force -ErrorAction SilentlyContinue}
+          }
+
+      - name: Runtime smoke - embedded WebView2 window and one-click install
         shell: pwsh
         run: |
-          $exe=(Resolve-Path 'dist/Haya_Job_Autopilot_v3.1.0_DEV.exe').Path
-          $gui=Start-Process -FilePath $exe -PassThru
-          try{Start-Sleep -Seconds 5;$gui.Refresh();if($gui.HasExited){throw "GUI exited with $($gui.ExitCode)"}}finally{$gui.Refresh();if(-not $gui.HasExited){Stop-Process -Id $gui.Id -Force}}
+          $ErrorActionPreference='Stop'
+          $appData=Join-Path $env:LOCALAPPDATA 'HayaJobAutopilot'
+          Remove-Item $appData -Recurse -Force -ErrorAction SilentlyContinue
+          $exe=(Resolve-Path (Join-Path 'dist' $env:CANDIDATE_EXE)).Path
+          $ui=Start-Process -FilePath $exe -PassThru
+          try {
+            $health=$null
+            for($i=0;$i -lt 50;$i++){
+              Start-Sleep -Milliseconds 400
+              $ui.Refresh()
+              if($ui.HasExited){throw "Embedded WebView process exited early with code $($ui.ExitCode)"}
+              try{$health=Invoke-RestMethod 'http://127.0.0.1:8787/healthz' -TimeoutSec 2;if($health.ok){break}}catch{}
+            }
+            if(-not $health -or -not $health.ok){throw 'One-click WebView launcher did not leave agent online'}
+            $installed=Join-Path $appData 'Haya Job Autopilot.exe'
+            if(-not (Test-Path $installed)){throw 'Installed EXE missing after one-click launch'}
+            Start-Sleep -Seconds 3
+            $ui.Refresh()
+            if($ui.HasExited){throw 'Embedded WebView2 UI did not remain alive'}
+            $second=Start-Process -FilePath $installed -PassThru
+            for($i=0;$i -lt 30 -and -not $second.HasExited;$i++){Start-Sleep -Milliseconds 200;$second.Refresh()}
+            if(-not $second.HasExited){Stop-Process -Id $second.Id -Force -ErrorAction SilentlyContinue;throw 'Second UI instance was not suppressed'}
+            $ui.Refresh()
+            if($ui.HasExited){throw 'Primary UI exited after second-instance launch'}
+          } finally {
+            if($ui -and -not $ui.HasExited){Stop-Process -Id $ui.Id -Force -ErrorAction SilentlyContinue}
+            try{Invoke-RestMethod 'http://127.0.0.1:8787/api/shutdown' -Method POST -ContentType 'application/json' -Body '{}' -TimeoutSec 5 | Out-Null}catch{}
+          }
+
       - uses: actions/upload-artifact@v4
         with:
-          name: Haya-Job-Autopilot-v3.1.0-dev-windows
+          name: Haya-Job-Autopilot-v3.1.0-dev-WebView2
           path: |
             dist/Haya_Job_Autopilot_v3.1.0_DEV.exe
             dist/SHA256-v3.1.0-dev.txt
