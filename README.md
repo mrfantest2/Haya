@@ -1,75 +1,81 @@
 # Haya Job Autopilot
 
-Private Windows job-search and strict auto-application system for **Haya Saadeh** in Budapest.
+Private Windows job-search and controlled application assistant for **Haya Saadeh** in Budapest.
 
-## Current baseline
+## Current production baseline — v3.0.0 No Docker Edition
 
-- Manager: **v2.0.2**
-- Windows: x64 native Win32 single-file manager
-- Agent: Node.js 22 + Docker
-- Dashboard: `http://127.0.0.1:8787`
-- Schedule: every 6 hours
-- Default daily automatic application cap: 5
-- Automatic submission route: verified corporate email only
-- CAPTCHAs, assessments, platform bot restrictions, and unknown legal answers are never bypassed.
+- One native Windows x64 executable
+- No Docker Desktop
+- No WSL
+- No Node.js runtime
+- No administrator/UAC installation path
+- Same EXE provides the setup/management UI and hidden `--agent` background mode
+- Local dashboard: `http://127.0.0.1:8787`
+- Yahoo app password encrypted with Windows DPAPI
+- Automatic startup under the current Windows user
+- Search cycle: every 6 hours by default
+- Modes: Monitor Only / Prepare & Ask / Strict Auto Apply
 
-## v2.0.2 installer hardening
+## Authoritative source
 
-The final manager uses one always-visible three-column interface:
+The exact v3.0.0 source used for the locally validated release is stored as:
 
-1. **Install / Repair**
-2. **Private details**
-3. **Run / Manage / Uninstall**
+`source-v3/Haya_Job_Autopilot_v3.0.0_Source.zip`
 
-The installer specifically protects against the previously observed repeated popup/UAC loop:
+Its SHA-256 is recorded in `source-v3/SHA256.txt`. GitHub Actions extracts that archive into a clean workspace before validation/build, so the checked source archive is the build input.
 
-- native single-manager Windows mutex;
-- atomic Install single-flight guard;
-- cross-process `%TEMP%\HayaJobAutopilot-DockerInstall.lock`;
-- no modal install-error loop;
-- only one elevated prerequisite process can be active at a time.
+The previous Docker/WSL v2 implementation is archived under `legacy/v2-docker/` for lineage only. It is not part of the active v3 build.
 
-All Docker, WSL, HTTP, PowerShell, and agent operations execute outside the Win32 UI thread. `WM_SIZE` performs geometry only, so resizing/maximizing does not run prerequisite checks or Docker commands.
+## Why v3 exists
+
+The v2 line proved the workflow but Docker/WSL created unnecessary installation complexity for a non-technical Windows user. v3 removes that entire dependency chain.
+
+The manager installs itself into `%LOCALAPPDATA%\HayaJobAutopilot`, writes the embedded CV when missing, registers hidden background mode at sign-in, and launches the agent directly. There is no UAC elevation path in the normal v3 install flow.
+
+## Safety model
+
+The agent never invents application answers. Strict Auto Apply is allowed only when verified profile answers exist, the match threshold passes, fraud risk stays below policy, the application address is an application-intent corporate mailbox matching the vacancy domain, the CV exists, and the daily cap has not been reached.
+
+CAPTCHAs, assessments, unknown legal declarations, and platform anti-bot restrictions are not bypassed.
 
 ## Repository layout
 
 ```text
-manager/                 Native Windows manager source
-agent/                   Automatic job agent and local dashboard
-config/                  Haya profile and private-answer template
-docs/                    CV and project documentation
-scripts/build_payload.py Reproducible embedded-payload builder
-Dockerfile               Agent image
-docker-compose.yml       Local deployment
-dist/SHA256.txt          Verified local Windows-build checksum
-.github/workflows/        CI/build/debug automation
+source-v3/                authoritative v3 source archive + checksum
+config/                   human-readable candidate profile/templates
+docs/                     architecture, debugging, privacy, release notes, CV
+legacy/v2-docker/         archived v2 Docker/Node source lineage
+.github/workflows/        reproducible v3 build and regression checks
+dist/                     release checksum metadata
 ```
 
-## Reproducible build
+## Build v3 manually
 
 ```bash
-python scripts/build_payload.py
+rm -rf .v3src
+mkdir .v3src
+unzip source-v3/Haya_Job_Autopilot_v3.0.0_Source.zip -d .v3src
+cd .v3src
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build \
   -trimpath -ldflags="-H=windowsgui -s -w" \
-  -o dist/Haya_Job_Autopilot_Manager.exe ./manager
+  -o Haya_Job_Autopilot_Manager_v3.0.0.exe ./manager
 ```
 
-## Security model
+No third-party Go module is required.
 
-The repository contains no Yahoo app password and no completed work-authorization answers. The manager writes those values only to the local `.env`, which is gitignored. Haya's normal Yahoo password is never requested.
+## Local runtime data
 
-Docker Desktop is downloaded only from Docker's official Windows endpoint and its Authenticode signer is validated before silent installation.
+```text
+%LOCALAPPDATA%\HayaJobAutopilot\
+  Haya Job Autopilot.exe
+  data\config.json
+  data\jobs.json
+  data\state.json
+  documents\Haya_Saadeh_CV.pdf
+  applications\
+  logs\agent.log
+```
 
-## Runtime flow
+`config.json` stores the Yahoo app password only as Windows DPAPI ciphertext bound to the current Windows user.
 
-1. The manager extracts the embedded agent into `%LOCALAPPDATA%\HayaJobAutopilot`.
-2. It prepares WSL 2 and installs Docker Desktop if required.
-3. Docker Compose starts the agent on `127.0.0.1:8787`.
-4. The agent reads job-alert emails, extracts vacancy links, scores them against Haya's profile, applies fraud-risk checks, prepares tailored application text, deduplicates results, and tracks status.
-5. Strict verified-email auto-apply is permitted only when all required private answers exist and the vacancy passes the configured thresholds.
-
-## Validation status
-
-The v2.0.2 source passes local Go cross-compilation to a Windows x64 GUI executable, Node syntax validation, JSON validation, and anti-popup regression assertions. GitHub Actions workflows are committed, but GitHub currently refuses to start hosted runners for this private repository because the account reports a billing/spending-limit problem. See `docs/CI_STATUS.md`.
-
-See [docs/DEBUGGING.md](docs/DEBUGGING.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md).
+See `docs/ARCHITECTURE.md`, `docs/DEBUGGING.md`, `docs/PRIVACY.md`, and `docs/RELEASE_NOTES.md`.
