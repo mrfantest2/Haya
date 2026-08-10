@@ -1,5 +1,18 @@
 # Release notes
 
+## v2.0.2
+
+- Repaired the authoritative GitHub `manager/main.go` source after detecting a corrupted/truncated blob in the first repository import.
+- Kept the single always-visible three-column manager architecture.
+- Preserved the native single-manager Windows mutex.
+- Preserved the atomic Install single-flight guard so repeated clicks cannot launch overlapping installers.
+- Preserved the cross-process `%TEMP%\HayaJobAutopilot-DockerInstall.lock` with stale-lock recovery.
+- Install/prerequisite failures remain in the in-app status panel instead of entering a modal popup loop.
+- One clean prerequisite install can generate at most one expected Windows UAC approval prompt at a time.
+- Local release validation: Go Windows x64 GUI build PASS, Node syntax PASS, JSON validation PASS, anti-popup regression assertions PASS.
+- Verified v2.0.2 Windows executable SHA-256: `900f4602e05e02610ede584ba1703dce94295a8c530486fd4504308c869d1207`.
+- GitHub Actions workflows are present but hosted runners are currently blocked by the GitHub account billing/spending-limit state; this is documented separately in `CI_STATUS.md`.
+
 ## v2.0.1
 
 - Fixed repeated popup/UAC spam when Install / Repair was activated while another install path was already active.
