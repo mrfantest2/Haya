@@ -1,0 +1,92 @@
+name: Publish frozen v3.0.0 release
+
+on:
+  workflow_run:
+    workflows: ["Windows v3.0 functional smoke"]
+    types: [completed]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: v3.0.0
+      RELEASE_EXE: Haya_Job_Autopilot_v3.0.0_No_Docker.exe
+      EXPECTED_EXE_SHA256: a7c1389411fec97cdf7c92f3a4ea104f52d73abb9c97b071c01ff36c326a62c5
+      EXPECTED_SOURCE_SHA256: f6e400144dafad0b7f19a3b30edfcb6fdfbc23d0ed17c4c8142b6de1fc5027f1
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+      - name: Reconstruct exact frozen source
+        run: |
+          mkdir -p release .v3src
+          cat source-v3/parts/part00 \
+              source-v3/parts/part01 \
+              source-v3/parts/part02 \
+              source-v3/parts/part03 \
+              source-v3/parts/part04a \
+              source-v3/parts/part04b \
+              source-v3/parts/part05 \
+              source-v3/parts/part06 \
+              > release/Haya_Job_Autopilot_v3.0.0_Source.zip
+          source_actual=$(sha256sum release/Haya_Job_Autopilot_v3.0.0_Source.zip | awk '{print $1}')
+          test "$source_actual" = "$EXPECTED_SOURCE_SHA256"
+          printf '%s  %s\n' "$source_actual" 'Haya_Job_Autopilot_v3.0.0_Source.zip' > release/SHA256-Source-v3.0.0.txt
+          unzip -q release/Haya_Job_Autopilot_v3.0.0_Source.zip -d .v3src
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.2'
+          cache: false
+      - name: Rebuild exact frozen release
+        working-directory: .v3src
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: '0'
+        run: |
+          go build -buildvcs=false -trimpath -ldflags='-H=windowsgui -s -w' -o "../release/$RELEASE_EXE" ./manager
+          actual=$(sha256sum "../release/$RELEASE_EXE" | awk '{print $1}')
+          test "$actual" = "$EXPECTED_EXE_SHA256"
+          printf '%s  %s\n' "$actual" "$RELEASE_EXE" > ../release/SHA256-v3.0.0.txt
+      - name: Create or update GitHub Release
+        run: |
+          cat > release/RELEASE_BODY.md <<'EOF'
+          # Haya Job Autopilot v3.0.0 - No Docker Edition
+
+          Frozen functional baseline.
+
+          - Native Windows x64 single-file application
+          - No Docker, WSL, Node.js, or administrator installation dependency
+          - Same EXE provides manager and hidden background agent
+          - Yahoo app password protected with Windows DPAPI
+          - Local dashboard bound to 127.0.0.1:8787
+          - Monitor Only, Prepare & Ask, and Strict Auto Apply modes
+          - Duplicate manager/agent process guards
+          - Windows hosted runtime smoke verified before publication
+          - EXE SHA-256: `a7c1389411fec97cdf7c92f3a4ea104f52d73abb9c97b071c01ff36c326a62c5`
+          - Source SHA-256: `f6e400144dafad0b7f19a3b30edfcb6fdfbc23d0ed17c4c8142b6de1fc5027f1`
+
+          v3.0.0 is frozen. Further changes proceed as v3.1.x or later.
+          EOF
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --title "Haya Job Autopilot v3.0.0 - No Docker Edition" --notes-file release/RELEASE_BODY.md --latest
+          else
+            gh release create "$RELEASE_TAG" --target "${{ github.event.workflow_run.head_sha }}" --title "Haya Job Autopilot v3.0.0 - No Docker Edition" --notes-file release/RELEASE_BODY.md --latest
+          fi
+          gh release upload "$RELEASE_TAG" \
+            "release/$RELEASE_EXE" \
+            release/SHA256-v3.0.0.txt \
+            release/Haya_Job_Autopilot_v3.0.0_Source.zip \
+            release/SHA256-Source-v3.0.0.txt \
+            --clobber
+      - name: Verify published assets
+        run: |
+          gh release view "$RELEASE_TAG" --json url,tagName,isLatest,assets

@@ -1,46 +1,102 @@
-name: Windows v3 smoke build
+name: Windows v3.0 functional smoke
 
 on:
   push:
     branches: [main]
-    paths:
-      - 'source-v3/**'
-      - '.github/workflows/windows-smoke.yml'
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  windows-build:
-    runs-on: windows-latest
+  build-frozen-release:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Reconstruct exact frozen source
+        run: |
+          cat source-v3/parts/part00 \
+              source-v3/parts/part01 \
+              source-v3/parts/part02 \
+              source-v3/parts/part03 \
+              source-v3/parts/part04a \
+              source-v3/parts/part04b \
+              source-v3/parts/part05 \
+              source-v3/parts/part06 \
+              > Haya_Job_Autopilot_v3.0.0_Source.zip
+          echo 'f6e400144dafad0b7f19a3b30edfcb6fdfbc23d0ed17c4c8142b6de1fc5027f1  Haya_Job_Autopilot_v3.0.0_Source.zip' | sha256sum -c -
+          mkdir .v3src
+          unzip -q Haya_Job_Autopilot_v3.0.0_Source.zip -d .v3src
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23.x'
-      - name: Verify and extract authoritative source
-        shell: pwsh
-        run: |
-          $expected = (Get-Content source-v3/SHA256.txt).Split(' ')[0].Trim()
-          $actual = (Get-FileHash source-v3/Haya_Job_Autopilot_v3.0.0_Source.zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($actual -ne $expected) { throw "Source archive checksum mismatch" }
-          Remove-Item .v3src -Recurse -Force -ErrorAction SilentlyContinue
-          Expand-Archive source-v3/Haya_Job_Autopilot_v3.0.0_Source.zip .v3src
-      - name: Static v3 smoke assertions
-        shell: pwsh
-        run: |
-          $src = Get-Content .v3src/manager/main.go -Raw
-          if ($src -notmatch 'CompareAndSwap\(false, true\)') { throw 'Install single-flight guard missing' }
-          $all = Get-Content .v3src/manager/*.go -Raw
-          if ($all -match 'docker\.exe|wsl\.exe|runas') { throw 'Legacy prerequisite path returned to active v3 manager' }
-      - name: Build native Windows GUI
-        shell: pwsh
+          go-version: '1.23.2'
+          cache: false
+      - name: Build byte-identical release
         working-directory: .v3src
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: '0'
         run: |
-          go build -trimpath -ldflags "-H=windowsgui -s -w" -o ../Haya_Job_Autopilot_Manager_v3.0.0.exe ./manager
-          Get-FileHash ../Haya_Job_Autopilot_Manager_v3.0.0.exe -Algorithm SHA256 | Format-List
+          mkdir -p ../candidate
+          go build -buildvcs=false -trimpath -ldflags='-H=windowsgui -s -w' -o ../candidate/Haya_Job_Autopilot_v3.0.0_No_Docker.exe ./manager
+          echo 'a7c1389411fec97cdf7c92f3a4ea104f52d73abb9c97b071c01ff36c326a62c5  ../candidate/Haya_Job_Autopilot_v3.0.0_No_Docker.exe' | sha256sum -c -
+          sha256sum ../candidate/Haya_Job_Autopilot_v3.0.0_No_Docker.exe > ../candidate/SHA256-v3.0.0.txt
+          cp ../Haya_Job_Autopilot_v3.0.0_Source.zip ../candidate/
       - uses: actions/upload-artifact@v4
         with:
-          name: Haya-Job-Autopilot-v3.0.0-windows
-          path: Haya_Job_Autopilot_Manager_v3.0.0.exe
+          name: v3.0.0-exact-frozen-candidate
+          path: candidate/
+          if-no-files-found: error
+
+  windows-functional:
+    needs: build-frozen-release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: v3.0.0-exact-frozen-candidate
+          path: candidate
+      - name: Verify release identity
+        shell: pwsh
+        run: |
+          $actual=(Get-FileHash 'candidate\Haya_Job_Autopilot_v3.0.0_No_Docker.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($actual -ne 'a7c1389411fec97cdf7c92f3a4ea104f52d73abb9c97b071c01ff36c326a62c5'){ throw "EXE checksum mismatch: $actual" }
+          $src=(Get-FileHash 'candidate\Haya_Job_Autopilot_v3.0.0_Source.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($src -ne 'f6e400144dafad0b7f19a3b30edfcb6fdfbc23d0ed17c4c8142b6de1fc5027f1'){ throw "Source checksum mismatch: $src" }
+      - name: Runtime smoke - agent API
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Remove-Item (Join-Path $env:LOCALAPPDATA 'HayaJobAutopilot') -Recurse -Force -ErrorAction SilentlyContinue
+          $exe=(Resolve-Path 'candidate\Haya_Job_Autopilot_v3.0.0_No_Docker.exe').Path
+          $agent=Start-Process -FilePath $exe -ArgumentList '--agent' -PassThru
+          try {
+            $health=$null
+            for($i=0;$i -lt 40;$i++){
+              Start-Sleep -Milliseconds 500
+              try { $health=Invoke-RestMethod 'http://127.0.0.1:8787/healthz' -TimeoutSec 2; if($health.ok){break} } catch {}
+            }
+            if(-not $health -or -not $health.ok -or $health.version -ne '3.0.0'){ throw 'Agent health check failed' }
+            $status=Invoke-RestMethod 'http://127.0.0.1:8787/api/status' -TimeoutSec 3
+            if(-not $status.ok -or $status.version -ne '3.0.0'){ throw 'Status endpoint failed' }
+            $run=Invoke-WebRequest 'http://127.0.0.1:8787/api/run' -Method POST -ContentType 'application/json' -Body '{}' -TimeoutSec 10 -SkipHttpErrorCheck
+            if([int]$run.StatusCode -ne 409){ throw "Expected safe missing-credential block, got HTTP $([int]$run.StatusCode)" }
+            Invoke-RestMethod 'http://127.0.0.1:8787/api/shutdown' -Method POST -ContentType 'application/json' -Body '{}' -TimeoutSec 5 | Out-Null
+            for($i=0;$i -lt 30 -and -not $agent.HasExited;$i++){ Start-Sleep -Milliseconds 250; $agent.Refresh() }
+            if(-not $agent.HasExited){ throw 'Agent did not stop cleanly' }
+          } finally {
+            $agent.Refresh(); if(-not $agent.HasExited){ Stop-Process -Id $agent.Id -Force -ErrorAction SilentlyContinue }
+          }
+      - name: Runtime smoke - GUI stays alive
+        shell: pwsh
+        run: |
+          $gui=Start-Process -FilePath (Resolve-Path 'candidate\Haya_Job_Autopilot_v3.0.0_No_Docker.exe').Path -PassThru
+          try { Start-Sleep -Seconds 5; $gui.Refresh(); if($gui.HasExited){ throw "GUI exited unexpectedly: $($gui.ExitCode)" } }
+          finally { $gui.Refresh(); if(-not $gui.HasExited){ Stop-Process -Id $gui.Id -Force } }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Haya-Job-Autopilot-v3.0.0-windows-functional
+          path: candidate/
+          if-no-files-found: error
