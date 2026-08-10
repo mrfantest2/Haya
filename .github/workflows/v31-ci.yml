@@ -17,14 +17,14 @@ concurrency:
 jobs:
   windows-functional:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     env:
-      WAILS_VERSION: v2.13.0
       CANDIDATE_EXE: Haya_Job_Autopilot_v3.1.0_DEV.exe
+      WEBVIEW2_COMMIT: 56598839c808a2340edee99204db479f410e9bf4
     steps:
       - uses: actions/checkout@v4
 
-      - name: Reconstruct and verify exact v3.1 WebView2 source
+      - name: Reconstruct and verify exact v3.1 base source
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -35,9 +35,123 @@ jobs:
           [IO.File]::WriteAllBytes('v31-source.zip',[Convert]::FromBase64String($base64))
           $actual=(Get-FileHash 'v31-source.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
           $expected='866fa7fea338ba578e5d3acceed2e705c810c3fb9e252fc5e220309e168a504b'
-          if($actual -ne $expected){throw "v3.1 source checksum mismatch: $actual"}
+          if($actual -ne $expected){throw "v3.1 base source checksum mismatch: $actual"}
           Remove-Item '.v31src' -Recurse -Force -ErrorAction SilentlyContinue
           Expand-Archive -LiteralPath 'v31-source.zip' -DestinationPath '.v31src' -Force
+
+      - name: Apply reviewed direct WebView2 shell patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Remove-Item '.v31src\manager\shell_wails.go' -Force -ErrorAction SilentlyContinue
+          Remove-Item '.v31src\manager\wails.json' -Force -ErrorAction SilentlyContinue
+          @'
+          //go:build !webview2
+
+          package main
+
+          func runAppLauncher() error {
+              return runBrowserAppLauncher()
+          }
+          '@ | Set-Content '.v31src\manager\shell_edge.go' -Encoding utf8NoBOM
+          @'
+          //go:build webview2
+
+          package main
+
+          import (
+              "os"
+              "path/filepath"
+              "strings"
+              "time"
+              "unsafe"
+
+              webview2 "github.com/jchv/go-webview2"
+          )
+
+          var (
+              pFindWindowWeb    = u32.NewProc("FindWindowW")
+              pSetForegroundWeb = u32.NewProc("SetForegroundWindow")
+              pIsIconicWeb      = u32.NewProc("IsIconic")
+          )
+
+          const swRestore = 9
+
+          func focusExistingAppWindow() bool {
+              hwnd, _, _ := pFindWindowWeb.Call(0, uintptr(unsafe.Pointer(utf16Ptr(appTitle))))
+              if hwnd == 0 {
+                  return false
+              }
+              iconic, _, _ := pIsIconicWeb.Call(hwnd)
+              if iconic != 0 {
+                  pShowWindow.Call(hwnd, swRestore)
+              } else {
+                  pShowWindow.Call(hwnd, SW_SHOW)
+              }
+              pSetForegroundWeb.Call(hwnd)
+              return true
+          }
+
+          func runAppLauncher() error {
+              mutex, already, err := createNamedMutex("Local\\HayaJobAutopilotWebView31")
+              if err != nil {
+                  return err
+              }
+              defer closeHandle(mutex)
+              if already {
+                  focusExistingAppWindow()
+                  return nil
+              }
+              if err := ensureInstalledRuntime(); err != nil {
+                  return err
+              }
+
+              current, _ := os.Executable()
+              current, _ = filepath.Abs(current)
+              installed, _ := filepath.Abs(installedExePath())
+              if !strings.EqualFold(filepath.Clean(current), filepath.Clean(installed)) {
+                  if err := installLocal(); err != nil {
+                      return err
+                  }
+                  createDesktopShortcutBestEffort()
+              } else if status, _ := probeLocalAgent(); !strings.HasPrefix(status, "Running") {
+                  if err := startAgentWithWait(); err != nil {
+                      return err
+                  }
+              }
+              if err := waitForAgent(10 * time.Second); err != nil {
+                  return err
+              }
+
+              dataPath := filepath.Join(appDir(), "webview2")
+              if err := os.MkdirAll(dataPath, 0700); err != nil {
+                  return err
+              }
+              w := webview2.NewWithOptions(webview2.WebViewOptions{
+                  Debug: false,
+                  AutoFocus: true,
+                  DataPath: dataPath,
+                  WindowOptions: webview2.WindowOptions{
+                      Title: appTitle,
+                      Width: 1180,
+                      Height: 780,
+                      Center: true,
+                  },
+              })
+              if w == nil {
+                  appendLog("WebView2 unavailable; opened browser fallback", map[string]any{"version": appVersion})
+                  openTarget("http://127.0.0.1:8787")
+                  return nil
+              }
+              defer w.Destroy()
+              w.SetSize(900, 620, webview2.HintMin)
+              w.Navigate("http://127.0.0.1:8787/")
+              w.Run()
+              return nil
+          }
+          '@ | Set-Content '.v31src\manager\shell_webview2.go' -Encoding utf8NoBOM
+          Push-Location .v31src
+          try { gofmt -w manager\shell_edge.go manager\shell_webview2.go } finally { Pop-Location }
 
       - uses: actions/setup-go@v5
         with:
@@ -52,65 +166,48 @@ jobs:
           if($all -match 'docker\.exe|wsl\.exe|runas'){ throw 'Legacy prerequisite path returned' }
           if($all -notmatch 'CryptProtectData'){ throw 'DPAPI protection missing' }
           if($all -notmatch 'canonicalizeJobURL'){ throw 'Canonical dedupe missing' }
-          if($all -notmatch 'SingleInstanceLock'){ throw 'Embedded WebView single-instance guard missing' }
-          if($all -notmatch 'assetserver\.Options'){ throw 'Wails embedded asset server missing' }
+          if($all -notmatch 'HayaJobAutopilotWebView31'){ throw 'Direct WebView single-instance guard missing' }
+          if($all -notmatch 'github.com/jchv/go-webview2'){ throw 'Direct WebView2 binding missing' }
           if($all -notmatch 'Yahoo app password is optional'){ throw 'Optional Yahoo behavior guard missing' }
           if($all -match 'Work authorization answer missing'){ throw 'Work authorization still incorrectly blocks runtime' }
-          if(-not (Test-Path manager/wails.json)){ throw 'Wails project config missing' }
           node --check manager/resources/app.js
-          Get-Content manager/wails.json -Raw | ConvertFrom-Json | Out-Null
 
       - name: Unit tests
         working-directory: .v31src
         shell: pwsh
         run: go test ./manager -run 'TestCanonicalizeJobURL|TestJobFingerprint' -v
 
-      - name: Vet dependency-free fallback source
-        working-directory: .v31src
-        shell: pwsh
-        run: go vet -unsafeptr=false ./manager
-
-      - name: Build dependency-free repair fallback
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force dist | Out-Null
-          Push-Location .v31src
-          try { go build -buildvcs=false -trimpath -ldflags "-H=windowsgui -s -w" -o ../dist/Haya_Job_Autopilot_v3.1.0_FALLBACK.exe ./manager } finally { Pop-Location }
-
-      - name: Install pinned Wails v2 toolchain
-        working-directory: .v31src
-        shell: pwsh
-        run: |
-          go get "github.com/wailsapp/wails/v2@$env:WAILS_VERSION"
-          go install "github.com/wailsapp/wails/v2/cmd/wails@$env:WAILS_VERSION"
-          wails version
-
-      - name: Vet embedded WebView2 source
-        working-directory: .v31src
-        shell: pwsh
-        run: go vet -tags=wails -unsafeptr=false ./manager
-
-      - name: Build WebView2 candidate with fail-fast diagnostics
+      - name: Vet and build dependency-free repair fallback
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          Push-Location .v31src\manager
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Push-Location .v31src
           try {
-            $job=Start-Job -ScriptBlock {
-              param($exe)
-              wails build -v 2 -s -clean -webview2 download -tags wails -trimpath -o $exe
-            } -ArgumentList $env:CANDIDATE_EXE
-            if(-not (Wait-Job $job -Timeout 240)){
-              Stop-Job $job -ErrorAction SilentlyContinue
-              Receive-Job $job -Keep | Write-Host
-              throw 'Wails build exceeded four minutes'
-            }
-            Receive-Job $job
-            if($job.State -ne 'Completed'){throw "Wails build state: $($job.State)"}
+            go vet -unsafeptr=false ./manager
+            go build -buildvcs=false -trimpath -ldflags "-H=windowsgui -s -w" -o ../dist/Haya_Job_Autopilot_v3.1.0_FALLBACK.exe ./manager
           } finally { Pop-Location }
-          $built=Join-Path '.v31src\manager\build\bin' $env:CANDIDATE_EXE
-          if(-not (Test-Path $built)){ throw "Wails output missing: $built" }
-          Copy-Item $built (Join-Path 'dist' $env:CANDIDATE_EXE) -Force
+
+      - name: Pin direct pure-Go WebView2 binding
+        working-directory: .v31src
+        shell: pwsh
+        run: |
+          go get "github.com/jchv/go-webview2@$env:WEBVIEW2_COMMIT"
+          go mod tidy
+          go list -m github.com/jchv/go-webview2
+
+      - name: Vet and build direct WebView2 candidate
+        shell: pwsh
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          $ErrorActionPreference='Stop'
+          Push-Location .v31src
+          try {
+            go vet -tags=webview2 -unsafeptr=false ./manager
+            go build -buildvcs=false -trimpath -tags=webview2 -ldflags "-H=windowsgui -s -w" -o "../dist/$env:CANDIDATE_EXE" ./manager
+          } finally { Pop-Location }
+          if(-not (Test-Path (Join-Path 'dist' $env:CANDIDATE_EXE))){throw 'Direct WebView2 output missing'}
           (Get-FileHash (Join-Path 'dist' $env:CANDIDATE_EXE) -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content dist/SHA256-v3.1.0-dev.txt
 
       - name: Runtime smoke - agent, optional setup and local API
@@ -154,7 +251,7 @@ jobs:
             if(-not $agent.HasExited){Stop-Process -Id $agent.Id -Force -ErrorAction SilentlyContinue}
           }
 
-      - name: Runtime smoke - embedded WebView2 window and one-click install
+      - name: Runtime smoke - direct WebView2 one-click UI and single instance
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -167,18 +264,15 @@ jobs:
             for($i=0;$i -lt 50;$i++){
               Start-Sleep -Milliseconds 400
               $ui.Refresh()
-              if($ui.HasExited){throw "Embedded WebView process exited early with code $($ui.ExitCode)"}
+              if($ui.HasExited){throw "WebView2 process exited early with code $($ui.ExitCode)"}
               try{$health=Invoke-RestMethod 'http://127.0.0.1:8787/healthz' -TimeoutSec 2;if($health.ok){break}}catch{}
             }
-            if(-not $health -or -not $health.ok){throw 'One-click WebView launcher did not leave agent online'}
-            $installed=Join-Path $appData 'HayaJobAutopilot.exe'
-            if(-not (Test-Path $installed)){
-              $installed=Join-Path $appData 'Haya Job Autopilot.exe'
-            }
+            if(-not $health -or -not $health.ok){throw 'One-click WebView2 launcher did not leave agent online'}
+            $installed=Join-Path $appData 'Haya Job Autopilot.exe'
             if(-not (Test-Path $installed)){throw 'Installed EXE missing after one-click launch'}
             Start-Sleep -Seconds 3
             $ui.Refresh()
-            if($ui.HasExited){throw 'Embedded WebView2 UI did not remain alive'}
+            if($ui.HasExited){throw 'Direct WebView2 UI did not remain alive'}
             $second=Start-Process -FilePath $installed -PassThru
             for($i=0;$i -lt 30 -and -not $second.HasExited;$i++){Start-Sleep -Milliseconds 200;$second.Refresh()}
             if(-not $second.HasExited){Stop-Process -Id $second.Id -Force -ErrorAction SilentlyContinue;throw 'Second UI instance was not suppressed'}
@@ -191,7 +285,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Haya-Job-Autopilot-v3.1.0-dev-WebView2
+          name: Haya-Job-Autopilot-v3.1.0-dev-Direct-WebView2
           path: |
             dist/Haya_Job_Autopilot_v3.1.0_DEV.exe
             dist/SHA256-v3.1.0-dev.txt
