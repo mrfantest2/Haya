@@ -1,7 +1,11 @@
-# Privacy and credential handling
+# Privacy and safety
 
-This repository is private because it contains Haya's CV and contact information.
-
-Do not commit Yahoo app passwords, normal account passwords, residence-permit identifiers, passport data, banking data, or completed private legal-answer files.
-
-`.env` is intentionally excluded from Git. Automatic application submission is disabled by default and remains gated until the local manager receives Haya's verified answers.
+- Repository: private.
+- Haya's normal Yahoo password is never requested.
+- Yahoo app password is encrypted locally using Windows DPAPI.
+- No app password, work-authorization answer, salary answer or completed private configuration is committed to GitHub.
+- Dashboard listens only on `127.0.0.1`.
+- CV and job history remain under Haya's Windows profile unless she explicitly backs them up.
+- The agent never fabricates unknown legal, salary, sponsorship, availability or identity answers.
+- CAPTCHAs, assessments and platform anti-bot controls are not bypassed.
+- Strict Auto Apply uses only an application-intent corporate email route matching the vacancy domain and conservative match/risk thresholds.

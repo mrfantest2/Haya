@@ -1,42 +1,53 @@
-# Debugging
+# Debugging — v3.0.0
 
-## Fixed installer prompt loop
+## Dashboard
 
-If Install / Repair is clicked while installation is already active, v2.0.1 now ignores the duplicate activation and updates the status panel. A named Windows mutex prevents a second manager process, and a `%TEMP%\HayaJobAutopilot-DockerInstall.lock` prevents another process from opening a second Docker/WSL elevation flow. Install errors are non-modal, so they cannot create a popup loop.
+Open `http://127.0.0.1:8787`.
 
-Expected behavior when Docker/WSL prerequisites require elevation: **one Windows UAC approval prompt maximum per install attempt**.
+If it does not answer, open the manager and click **Start Agent** or **Restart Agent**.
 
-## Fixed UI regressions
+## Logs
 
-### Window became “Not Responding” when maximized
+Use **Open Logs** inside the manager.
 
-The failure class was slow work reaching the Windows message thread. v2.0 keeps `WM_SIZE` geometry-only. Docker, WSL, HTTP, PowerShell and Compose work runs asynchronously with explicit timeouts.
-
-### Sidebar displayed but content panel was blank
-
-The dynamic show/hide page architecture was removed. v2.0 is one always-visible three-column wizard, so there is no hidden page state to lose.
-
-## Local diagnostics
-
-Installed location:
+Primary log:
 
 ```text
-%LOCALAPPDATA%\HayaJobAutopilot
+%LOCALAPPDATA%\HayaJobAutopilot\logs\agent.log
 ```
 
-Important files:
+## Runtime files
 
 ```text
-logs\manager_last_docker.log
-logs\agent.log
-data\jobs.json
-data\state.json
-applications\
-.env
+%LOCALAPPDATA%\HayaJobAutopilot\data\config.json
+%LOCALAPPDATA%\HayaJobAutopilot\data\jobs.json
+%LOCALAPPDATA%\HayaJobAutopilot\data\state.json
 ```
 
-Do not post `.env` to GitHub or screenshots.
+JSON writes are atomic and retain a `.bak` snapshot of the previous version.
 
-## CI diagnostics
+## Yahoo authentication
 
-GitHub Actions validate Node syntax, JSON configuration, payload generation, Windows x64 Go compilation, PE file type, and SHA-256 output. A second workflow rebuilds on `windows-latest`.
+The agent requires a Yahoo **app password**, not Haya's normal Yahoo password. If a mailbox run fails, the manager can save a replacement app password. It is encrypted through Windows DPAPI before storage.
+
+## v3 installation problems
+
+Normal v3 install has no Docker, WSL or UAC path. Install/Repair only:
+
+1. prepares `%LOCALAPPDATA%\HayaJobAutopilot`;
+2. deploys the embedded CV when missing;
+3. copies the current executable to the install folder;
+4. registers the current-user startup entry;
+5. starts the hidden agent.
+
+Duplicate Install clicks are blocked by an atomic single-flight guard, and a second manager instance exits through a named Windows mutex.
+
+## Network checks
+
+The agent needs outbound access to:
+
+- `imap.mail.yahoo.com:993`
+- `smtp.mail.yahoo.com:465`
+- HTTPS job vacancy URLs
+
+The dashboard itself binds only to `127.0.0.1`.

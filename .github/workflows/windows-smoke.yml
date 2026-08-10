@@ -1,17 +1,12 @@
-name: Windows smoke build
+name: Windows v3 smoke build
 
 on:
-  workflow_dispatch:
   push:
     branches: [main]
     paths:
-      - 'manager/**'
-      - 'scripts/build_payload.py'
-      - 'agent/**'
-      - 'config/**'
-      - 'Dockerfile'
-      - 'docker-compose.yml'
+      - 'source-v3/**'
       - '.github/workflows/windows-smoke.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -24,24 +19,28 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23.x'
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-      - name: Build payload
-        run: python scripts/build_payload.py
-      - name: Build native GUI
+      - name: Verify and extract authoritative source
         shell: pwsh
         run: |
-          $env:GOOS='windows'
-          $env:GOARCH='amd64'
-          $env:CGO_ENABLED='0'
-          New-Item -ItemType Directory -Force dist | Out-Null
-          go build -trimpath -ldflags '-H=windowsgui -s -w' -o dist/Haya_Job_Autopilot_Manager.exe ./manager
-          if (!(Test-Path dist/Haya_Job_Autopilot_Manager.exe)) { throw 'Manager EXE missing' }
-          Get-FileHash dist/Haya_Job_Autopilot_Manager.exe -Algorithm SHA256 | Format-List | Out-File dist/windows-sha256.txt
+          $expected = (Get-Content source-v3/SHA256.txt).Split(' ')[0].Trim()
+          $actual = (Get-FileHash source-v3/Haya_Job_Autopilot_v3.0.0_Source.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "Source archive checksum mismatch" }
+          Remove-Item .v3src -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive source-v3/Haya_Job_Autopilot_v3.0.0_Source.zip .v3src
+      - name: Static v3 smoke assertions
+        shell: pwsh
+        run: |
+          $src = Get-Content .v3src/manager/main.go -Raw
+          if ($src -notmatch 'CompareAndSwap\(false, true\)') { throw 'Install single-flight guard missing' }
+          $all = Get-Content .v3src/manager/*.go -Raw
+          if ($all -match 'docker\.exe|wsl\.exe|runas') { throw 'Legacy prerequisite path returned to active v3 manager' }
+      - name: Build native Windows GUI
+        shell: pwsh
+        working-directory: .v3src
+        run: |
+          go build -trimpath -ldflags "-H=windowsgui -s -w" -o ../Haya_Job_Autopilot_Manager_v3.0.0.exe ./manager
+          Get-FileHash ../Haya_Job_Autopilot_Manager_v3.0.0.exe -Algorithm SHA256 | Format-List
       - uses: actions/upload-artifact@v4
         with:
-          name: Haya-Manager-Windows-Smoke
-          path: dist/*
-          if-no-files-found: error
-          retention-days: 14
+          name: Haya-Job-Autopilot-v3.0.0-windows
+          path: Haya_Job_Autopilot_Manager_v3.0.0.exe

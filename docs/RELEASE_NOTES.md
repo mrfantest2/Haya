@@ -1,38 +1,36 @@
 # Release notes
 
+## v3.0.0 — No Docker Edition
+
+- Removed Docker Desktop completely from the production architecture.
+- Removed WSL completely from the production architecture.
+- Removed Node.js as a runtime dependency.
+- Removed administrator/UAC installation from the normal flow.
+- Reimplemented the background job agent in Go standard library code.
+- The same single EXE now provides manager mode and hidden `--agent` mode.
+- Added current-user automatic startup.
+- Added Windows DPAPI encryption for the Yahoo app password.
+- Added direct Yahoo IMAP scanning over TLS.
+- Added direct Yahoo SMTP submission over TLS for strict verified-email applications.
+- Added embedded local dashboard served from the EXE.
+- Added Monitor Only, Prepare & Ask, and Strict Auto Apply modes.
+- Added atomic JSON storage and `.bak` snapshots.
+- Preserved manager and agent single-instance mutexes.
+- Preserved Install single-flight protection; duplicate clicks cannot create another installation path.
+- Hardened Strict Auto Apply to accept only application-intent corporate mailboxes matching the vacancy domain.
+- Corrected Windows autostart command quoting.
+- Added retry handling when replacing an older installed executable that may still be closing.
+- Embedded Haya's current CV and matching profile in the EXE.
+
 ## v2.0.2
 
-- Repaired the authoritative GitHub `manager/main.go` source after detecting a corrupted/truncated blob in the first repository import.
-- Kept the single always-visible three-column manager architecture.
-- Preserved the native single-manager Windows mutex.
-- Preserved the atomic Install single-flight guard so repeated clicks cannot launch overlapping installers.
-- Preserved the cross-process `%TEMP%\HayaJobAutopilot-DockerInstall.lock` with stale-lock recovery.
-- Install/prerequisite failures remain in the in-app status panel instead of entering a modal popup loop.
-- One clean prerequisite install can generate at most one expected Windows UAC approval prompt at a time.
-- Local release validation: Go Windows x64 GUI build PASS, Node syntax PASS, JSON validation PASS, anti-popup regression assertions PASS.
-- Final verified v2.0.2 Windows executable SHA-256: `40184f50c44fdf2c5cb0ae3e261eea65fe785d437c4203b192d7fa72206182c4`.
-- GitHub Actions workflows are present but hosted runners are currently blocked by the GitHub account billing/spending-limit state; this is documented separately in `CI_STATUS.md`.
+- Repaired authoritative manager source in GitHub after the v2.0.1 publication.
+- Preserved the anti-popup/UAC-spam safeguards.
 
 ## v2.0.1
 
-- Fixed repeated popup/UAC spam when Install / Repair was activated while another install path was already active.
-- Added a native single-manager Windows mutex. A second manager instance exits instead of starting another installer.
-- Added an atomic single-flight guard around the Install button. Duplicate activation cannot launch a second elevation request.
-- Added a cross-process `%TEMP%\HayaJobAutopilot-DockerInstall.lock` with stale-lock recovery.
-- Install failures and restart-required states are reported in the in-app status panel instead of modal error MessageBoxes.
-- The only expected system popup during a clean prerequisite install is the single Windows UAC approval prompt.
-- Added CI regression assertions for the popup-spam guards.
+- Added manager singleton, Install single-flight and Docker-install lock to stop repeated popup/UAC loops.
 
 ## v2.0.0
 
-- Replaced the sidebar/hidden-page manager with a single always-visible 3-step wizard.
-- Removed slow work from Win32 resize/repaint callbacks.
-- Added background operation reporting through `WM_APP`.
-- Preserved one-file Windows manager delivery.
-- Embedded Haya's current CV into the deployment payload.
-- Added automatic WSL 2 and Docker Desktop preparation.
-- Added Docker Authenticode validation before install.
-- Added private Yahoo/work-authorization configuration inside the manager.
-- Added Start, Stop, Restart, Run Now, Dashboard, Logs and uninstall controls.
-- Added application-history backup option during uninstall.
-- Added GitHub CI and Windows build validation.
+- Replaced hidden-page UI architecture with an always-visible guided manager.

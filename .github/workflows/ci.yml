@@ -1,4 +1,4 @@
-name: Build and validate
+name: Build and validate v3
 
 on:
   push:
@@ -17,52 +17,56 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23.x'
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Validate agent dependencies and syntax
-        working-directory: agent
+      - name: Verify authoritative source archive
         run: |
-          npm install --ignore-scripts --no-audit --no-fund
-          node --check server.js
-      - name: Validate JSON configuration
+          sha256sum -c source-v3/SHA256.txt
+          rm -rf .v3src
+          mkdir .v3src
+          unzip -q source-v3/Haya_Job_Autopilot_v3.0.0_Source.zip -d .v3src
+      - name: Validate profile JSON
+        working-directory: .v3src
         run: |
-          python -m json.tool config/haya_profile.json >/dev/null
-          python -m json.tool config/private_answers.template.json >/dev/null
-      - name: Installer popup-loop regression guards
-        run: |
-          grep -F 'CompareAndSwap(false, true)' manager/main.go
-          grep -F 'HayaJobAutopilot-DockerInstall.lock' manager/main.go
-          grep -F 'HayaJobAutopilotManagerSingleInstance' manager/main.go
-          grep -F 'case ID_INSTALL:' manager/main.go
-          grep -F 'startInstall()' manager/main.go
           python - <<'PY'
-          from pathlib import Path
-          s = Path('manager/main.go').read_text()
-          block = s[s.index('func startInstall()'):s.index('func busy(', s.index('func startInstall()'))]
-          assert 'msg:' not in block, 'install path must not post modal MessageBox errors'
-          assert 'installing.CompareAndSwap(false, true)' in block
-          print('popup-loop regression guards PASS')
+          import json
+          for p in ['config/haya_profile.json','config/private_answers.template.json','manager/resources/haya_profile.json']:
+              with open(p, encoding='utf-8') as f: json.load(f)
+              print('PASS', p)
           PY
-      - name: Build embedded payload
-        run: python scripts/build_payload.py
+      - name: Validate embedded CV
+        working-directory: .v3src
+        run: |
+          test -s manager/resources/Haya_Saadeh_CV.pdf
+          head -c 4 manager/resources/Haya_Saadeh_CV.pdf | grep -q '%PDF'
+      - name: Regression guards
+        working-directory: .v3src
+        run: |
+          grep -q 'CompareAndSwap(false, true)' manager/main.go
+          grep -q 'HayaJobAutopilotManagerV3' manager/main.go
+          grep -q 'HayaJobAutopilotAgentV3' manager/agent.go
+          grep -q 'CryptProtectData' manager/windows.go
+          ! grep -q 'docker.exe' manager/*.go
+          ! grep -q 'wsl.exe' manager/*.go
+          ! grep -q 'runas' manager/*.go
+      - name: Vet Windows source
+        working-directory: .v3src
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: '0'
+        run: go vet -unsafeptr=false ./manager
       - name: Build Windows manager
+        working-directory: .v3src
         env:
           GOOS: windows
           GOARCH: amd64
           CGO_ENABLED: '0'
         run: |
-          mkdir -p dist
-          go build -trimpath -ldflags='-H=windowsgui -s -w' -o dist/Haya_Job_Autopilot_Manager.exe ./manager
-          file dist/Haya_Job_Autopilot_Manager.exe | tee dist/FILE_TYPE.txt
-          grep -q 'PE32+ executable' dist/FILE_TYPE.txt
-          sha256sum dist/Haya_Job_Autopilot_Manager.exe | tee dist/SHA256.txt
+          go build -trimpath -ldflags='-H=windowsgui -s -w' -o ../Haya_Job_Autopilot_Manager_v3.0.0.exe ./manager
+          sha256sum ../Haya_Job_Autopilot_Manager_v3.0.0.exe > ../SHA256-v3.0.0.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: Haya-Job-Autopilot-Manager-Windows-x64
+          name: Haya-Job-Autopilot-v3.0.0
           path: |
-            dist/Haya_Job_Autopilot_Manager.exe
-            dist/SHA256.txt
-            dist/FILE_TYPE.txt
+            Haya_Job_Autopilot_Manager_v3.0.0.exe
+            SHA256-v3.0.0.txt
           if-no-files-found: error
-          retention-days: 30
