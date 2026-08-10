@@ -1,0 +1,90 @@
+name: v3.1 development validation
+
+on:
+  push:
+    branches: [v3.1-dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-functional:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify and extract v3.1 source
+        shell: pwsh
+        run: |
+          $zip='source-v3.1\Haya_Job_Autopilot_v3.1.0_DEV_Source.zip'
+          $actual=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $expected='f8e2f2bbd0173e0fc96f616aa80b09e1a87e7355fecb655dba59606b5edbe0d6'
+          if($actual -ne $expected){throw "v3.1 source checksum mismatch: $actual"}
+          Remove-Item .v31src -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive -LiteralPath $zip -DestinationPath .v31src -Force
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.2'
+          cache: false
+      - name: Static safety guards
+        working-directory: .v31src
+        shell: pwsh
+        run: |
+          $all=(Get-Content manager/*.go -Raw) -join "`n"
+          if($all -match 'docker\.exe|wsl\.exe|runas'){throw 'Legacy prerequisite path returned'}
+          if($all -notmatch 'CryptProtectData'){throw 'DPAPI protection missing'}
+          if($all -notmatch 'setupReadiness'){throw 'Readiness diagnostics missing'}
+          if($all -notmatch 'canonicalizeJobURL'){throw 'Canonical dedupe missing'}
+      - name: Unit tests
+        working-directory: .v31src
+        shell: pwsh
+        run: go test ./manager -run 'TestCanonicalizeJobURL|TestJobFingerprint' -v
+      - name: Vet Windows source
+        working-directory: .v31src
+        shell: pwsh
+        run: go vet -unsafeptr=false ./manager
+      - name: Build development candidate
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Push-Location .v31src
+          try { go build -buildvcs=false -trimpath -ldflags "-H=windowsgui -s -w" -o ../dist/Haya_Job_Autopilot_v3.1.0_DEV.exe ./manager } finally { Pop-Location }
+          (Get-FileHash dist/Haya_Job_Autopilot_v3.1.0_DEV.exe -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content dist/SHA256-v3.1.0-dev.txt
+      - name: Runtime smoke - agent, diagnostics and safety gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $appData=Join-Path $env:LOCALAPPDATA 'HayaJobAutopilot'
+          Remove-Item $appData -Recurse -Force -ErrorAction SilentlyContinue
+          $exe=(Resolve-Path 'dist/Haya_Job_Autopilot_v3.1.0_DEV.exe').Path
+          $agent=Start-Process -FilePath $exe -ArgumentList '--agent' -PassThru
+          try {
+            $health=$null
+            for($i=0;$i -lt 40;$i++){Start-Sleep -Milliseconds 500;try{$health=Invoke-RestMethod 'http://127.0.0.1:8787/healthz' -TimeoutSec 2;if($health.ok){break}}catch{}}
+            if(-not $health -or -not $health.ok){throw 'Agent health endpoint did not start'}
+            if($health.version -ne '3.1.0-dev'){throw "Unexpected version $($health.version)"}
+            $status=Invoke-RestMethod 'http://127.0.0.1:8787/api/status' -TimeoutSec 3
+            if($status.setupReady -ne $false){throw 'Fresh profile should not report setupReady=true'}
+            $diag=Invoke-RestMethod 'http://127.0.0.1:8787/api/diagnostics' -TimeoutSec 3
+            if(-not $diag.ok){throw 'Local diagnostics should pass on clean runtime'}
+            $mail=Invoke-WebRequest 'http://127.0.0.1:8787/api/test-mail' -Method POST -ContentType 'application/json' -Body '{}' -SkipHttpErrorCheck -TimeoutSec 5
+            if([int]$mail.StatusCode -ne 409){throw "Mail safety gate expected 409, got $([int]$mail.StatusCode)"}
+            $run=Invoke-WebRequest 'http://127.0.0.1:8787/api/run' -Method POST -ContentType 'application/json' -Body '{}' -SkipHttpErrorCheck -TimeoutSec 5
+            if([int]$run.StatusCode -ne 409){throw "Run safety gate expected 409, got $([int]$run.StatusCode)"}
+            Invoke-RestMethod 'http://127.0.0.1:8787/api/shutdown' -Method POST -ContentType 'application/json' -Body '{}' -TimeoutSec 5 | Out-Null
+            for($i=0;$i -lt 30 -and -not $agent.HasExited;$i++){Start-Sleep -Milliseconds 250;$agent.Refresh()}
+            if(-not $agent.HasExited){throw 'Agent did not shut down cleanly'}
+          } finally {$agent.Refresh();if(-not $agent.HasExited){Stop-Process -Id $agent.Id -Force -ErrorAction SilentlyContinue}}
+      - name: Runtime smoke - GUI stays alive
+        shell: pwsh
+        run: |
+          $exe=(Resolve-Path 'dist/Haya_Job_Autopilot_v3.1.0_DEV.exe').Path
+          $gui=Start-Process -FilePath $exe -PassThru
+          try{Start-Sleep -Seconds 5;$gui.Refresh();if($gui.HasExited){throw "GUI exited with $($gui.ExitCode)"}}finally{$gui.Refresh();if(-not $gui.HasExited){Stop-Process -Id $gui.Id -Force}}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Haya-Job-Autopilot-v3.1.0-dev-windows
+          path: |
+            dist/Haya_Job_Autopilot_v3.1.0_DEV.exe
+            dist/SHA256-v3.1.0-dev.txt
+          if-no-files-found: error
