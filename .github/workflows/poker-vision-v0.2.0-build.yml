@@ -1,4 +1,4 @@
-name: Poker Vision v0.2.1 APK
+name: Poker Vision v0.2.2 APK
 
 on:
   push:
@@ -50,16 +50,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p poker-vision-dist
-          cp poker-trainer-ci/app/build/outputs/apk/debug/app-debug.apk poker-vision-dist/Poker-Vision-v0.2.1.apk
-          test "$(stat -c%s poker-vision-dist/Poker-Vision-v0.2.1.apk)" -gt 100000
-          unzip -t poker-vision-dist/Poker-Vision-v0.2.1.apk >/dev/null
-          (cd poker-vision-dist && sha256sum Poker-Vision-v0.2.1.apk > SHA256SUMS.txt)
+          cp poker-trainer-ci/app/build/outputs/apk/debug/app-debug.apk poker-vision-dist/Poker-Vision-v0.2.2.apk
+          test "$(stat -c%s poker-vision-dist/Poker-Vision-v0.2.2.apk)" -gt 100000
+          unzip -t poker-vision-dist/Poker-Vision-v0.2.2.apk >/dev/null
+          (cd poker-vision-dist && sha256sum Poker-Vision-v0.2.2.apk > SHA256SUMS.txt)
           cat poker-vision-dist/SHA256SUMS.txt
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Poker-Vision-v0.2.1-apk
+          name: Poker-Vision-v0.2.2-apk
           path: poker-vision-dist/*
           if-no-files-found: error
           retention-days: 30
