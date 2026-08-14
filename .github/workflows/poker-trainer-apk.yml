@@ -1,0 +1,59 @@
+name: Poker Trainer APK build
+
+on:
+  push:
+    branches: [poker-trainer-apk-build]
+    paths:
+      - 'poker-trainer-ci/**'
+      - '.github/workflows/poker-trainer-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-poker-trainer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout build branch
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 35
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build Poker Trainer debug APK
+        working-directory: poker-trainer-ci
+        run: gradle --no-daemon clean assembleDebug --stacktrace
+
+      - name: Prepare APK and checksum
+        run: |
+          mkdir -p poker-trainer-artifact
+          cp poker-trainer-ci/app/build/outputs/apk/debug/app-debug.apk poker-trainer-artifact/Poker-Trainer-v0.1.0.apk
+          cd poker-trainer-artifact
+          sha256sum Poker-Trainer-v0.1.0.apk > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload Poker Trainer APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Poker-Trainer-v0.1.0-apk
+          path: poker-trainer-artifact/*
+          if-no-files-found: error
+          retention-days: 30
