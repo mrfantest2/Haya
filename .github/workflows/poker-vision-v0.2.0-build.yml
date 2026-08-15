@@ -1,4 +1,4 @@
-name: Poker Vision v0.2.4 APK
+name: Poker Vision v0.2.5 APK
 
 on:
   push:
@@ -18,9 +18,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Apply v0.2.4 UI patch
-        run: python3 poker-trainer-ci/tools/apply_v024.py
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -53,16 +50,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p poker-vision-dist
-          cp poker-trainer-ci/app/build/outputs/apk/debug/app-debug.apk poker-vision-dist/Poker-Vision-v0.2.4.apk
-          test "$(stat -c%s poker-vision-dist/Poker-Vision-v0.2.4.apk)" -gt 100000
-          unzip -t poker-vision-dist/Poker-Vision-v0.2.4.apk >/dev/null
-          (cd poker-vision-dist && sha256sum Poker-Vision-v0.2.4.apk > SHA256SUMS.txt)
+          cp poker-trainer-ci/app/build/outputs/apk/debug/app-debug.apk poker-vision-dist/Poker-Vision-v0.2.5.apk
+          test "$(stat -c%s poker-vision-dist/Poker-Vision-v0.2.5.apk)" -gt 100000
+          unzip -t poker-vision-dist/Poker-Vision-v0.2.5.apk >/dev/null
+          (cd poker-vision-dist && sha256sum Poker-Vision-v0.2.5.apk > SHA256SUMS.txt)
           cat poker-vision-dist/SHA256SUMS.txt
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Poker-Vision-v0.2.4-apk
+          name: Poker-Vision-v0.2.5-apk
           path: poker-vision-dist/*
           if-no-files-found: error
           retention-days: 30
