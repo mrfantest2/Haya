@@ -9,7 +9,7 @@
         android:theme="@style/AppTheme"
         android:supportsRtl="true">
         <activity
-            android:name=".VisionActivity"
+            android:name=".VisionActivityV023"
             android:screenOrientation="portrait"
             android:exported="true">
             <intent-filter>
