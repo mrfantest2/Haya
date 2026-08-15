@@ -1,4 +1,4 @@
-name: Poker Vision v0.2.5 APK
+name: Poker Vision v0.2.6 Play Preflight
 
 on:
   push:
@@ -28,38 +28,41 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK 35
+      - name: Install Android SDK 36
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+          sdkmanager "platforms;android-36" "build-tools;35.0.0"
 
-      - name: Set up Gradle 8.9
+      - name: Set up Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: '8.11.1'
 
       - name: Unit tests
         working-directory: poker-trainer-ci
         run: gradle --no-daemon testDebugUnitTest --stacktrace
 
-      - name: Build debug APK
+      - name: Build APK and release bundle
         working-directory: poker-trainer-ci
-        run: gradle --no-daemon assembleDebug --stacktrace
+        run: gradle --no-daemon assembleDebug bundleRelease --stacktrace
 
-      - name: Validate APK
+      - name: Validate artifacts
         run: |
           set -euo pipefail
           mkdir -p poker-vision-dist
-          cp poker-trainer-ci/app/build/outputs/apk/debug/app-debug.apk poker-vision-dist/Poker-Vision-v0.2.5.apk
-          test "$(stat -c%s poker-vision-dist/Poker-Vision-v0.2.5.apk)" -gt 100000
-          unzip -t poker-vision-dist/Poker-Vision-v0.2.5.apk >/dev/null
-          (cd poker-vision-dist && sha256sum Poker-Vision-v0.2.5.apk > SHA256SUMS.txt)
+          cp poker-trainer-ci/app/build/outputs/apk/debug/app-debug.apk poker-vision-dist/Poker-Vision-v0.2.6.apk
+          cp poker-trainer-ci/app/build/outputs/bundle/release/app-release.aab poker-vision-dist/Poker-Vision-v0.2.6-unsigned.aab
+          test "$(stat -c%s poker-vision-dist/Poker-Vision-v0.2.6.apk)" -gt 100000
+          test "$(stat -c%s poker-vision-dist/Poker-Vision-v0.2.6-unsigned.aab)" -gt 100000
+          unzip -t poker-vision-dist/Poker-Vision-v0.2.6.apk >/dev/null
+          unzip -t poker-vision-dist/Poker-Vision-v0.2.6-unsigned.aab >/dev/null
+          (cd poker-vision-dist && sha256sum Poker-Vision-v0.2.6.apk Poker-Vision-v0.2.6-unsigned.aab > SHA256SUMS.txt)
           cat poker-vision-dist/SHA256SUMS.txt
 
-      - name: Upload APK artifact
+      - name: Upload Play preflight artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Poker-Vision-v0.2.5-apk
+          name: Poker-Vision-v0.2.6-play-preflight
           path: poker-vision-dist/*
           if-no-files-found: error
           retention-days: 30
