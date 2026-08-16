@@ -1,8 +1,8 @@
-name: Poker Vision v0.2.6 Play Preflight
+name: Poker Vision v0.2.7 Play Release
 
 on:
   push:
-    branches: [poker-vision-v0.2.0]
+    branches: [poker-vision-v0.2.0, poker-vision-v0.2.7-play-release]
     paths:
       - 'poker-trainer-ci/**'
       - '.github/workflows/poker-vision-v0.2.0-build.yml'
@@ -50,19 +50,19 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p poker-vision-dist
-          cp poker-trainer-ci/app/build/outputs/apk/debug/app-debug.apk poker-vision-dist/Poker-Vision-v0.2.6.apk
-          cp poker-trainer-ci/app/build/outputs/bundle/release/app-release.aab poker-vision-dist/Poker-Vision-v0.2.6-unsigned.aab
-          test "$(stat -c%s poker-vision-dist/Poker-Vision-v0.2.6.apk)" -gt 100000
-          test "$(stat -c%s poker-vision-dist/Poker-Vision-v0.2.6-unsigned.aab)" -gt 100000
-          unzip -t poker-vision-dist/Poker-Vision-v0.2.6.apk >/dev/null
-          unzip -t poker-vision-dist/Poker-Vision-v0.2.6-unsigned.aab >/dev/null
-          (cd poker-vision-dist && sha256sum Poker-Vision-v0.2.6.apk Poker-Vision-v0.2.6-unsigned.aab > SHA256SUMS.txt)
+          cp poker-trainer-ci/app/build/outputs/apk/debug/app-debug.apk poker-vision-dist/Poker-Vision-v0.2.7.apk
+          cp poker-trainer-ci/app/build/outputs/bundle/release/app-release.aab poker-vision-dist/Poker-Vision-v0.2.7-unsigned.aab
+          test "$(stat -c%s poker-vision-dist/Poker-Vision-v0.2.7.apk)" -gt 100000
+          test "$(stat -c%s poker-vision-dist/Poker-Vision-v0.2.7-unsigned.aab)" -gt 100000
+          unzip -t poker-vision-dist/Poker-Vision-v0.2.7.apk >/dev/null
+          unzip -t poker-vision-dist/Poker-Vision-v0.2.7-unsigned.aab >/dev/null
+          (cd poker-vision-dist && sha256sum Poker-Vision-v0.2.7.apk Poker-Vision-v0.2.7-unsigned.aab > SHA256SUMS.txt)
           cat poker-vision-dist/SHA256SUMS.txt
 
-      - name: Upload Play preflight artifacts
+      - name: Upload Play release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Poker-Vision-v0.2.6-play-preflight
+          name: Poker-Vision-v0.2.7-play-release
           path: poker-vision-dist/*
           if-no-files-found: error
           retention-days: 30
