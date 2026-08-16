@@ -14,7 +14,7 @@
 ## English
 
 ### Short description
-Scan playing cards, learn poker hands, and estimate offline Texas Hold'em equity.
+Scan cards, learn poker hands, and estimate offline Texas Hold'em equity.
 
 ### Full description
 Poker Vision is an offline poker learning and hand-analysis tool designed for training, study, and casual home-game analysis.
