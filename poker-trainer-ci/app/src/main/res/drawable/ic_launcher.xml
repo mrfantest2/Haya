@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:fillColor="#052C20"
+        android:pathData="M0,0h108v108h-108z" />
+
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#D8AA3D"
+        android:strokeWidth="3"
+        android:pathData="M10,10 L98,10 L98,98 L10,98 Z" />
+
+    <!-- Left playing card -->
+    <path
+        android:fillColor="#FAF8F1"
+        android:strokeColor="#D8AA3D"
+        android:strokeWidth="1.2"
+        android:pathData="M23,20 L55,16 L61,76 L29,80 Z" />
+
+    <!-- Right playing card -->
+    <path
+        android:fillColor="#FAF8F1"
+        android:strokeColor="#D8AA3D"
+        android:strokeWidth="1.2"
+        android:pathData="M51,17 L85,23 L76,81 L42,76 Z" />
+
+    <!-- Spade -->
+    <path
+        android:fillColor="#151515"
+        android:pathData="M39,34 C34,39 31,42 31,46 C31,50 34,53 38,53 C40,53 42,52 43,50 C42,55 40,58 37,60 L45,60 C42,57 40,54 40,50 C41,52 43,53 45,53 C49,53 52,50 52,46 C52,42 48,39 43,34 L41,32 Z" />
+
+    <!-- Heart -->
+    <path
+        android:fillColor="#C82734"
+        android:pathData="M66,34 C63,30 57,31 56,36 C54,31 48,30 45,34 C41,39 45,45 56,53 C67,45 71,39 66,34 Z" />
+
+    <!-- Camera/lens -->
+    <path
+        android:fillColor="#161616"
+        android:strokeColor="#D8AA3D"
+        android:strokeWidth="2"
+        android:pathData="M54,42 C64,42 72,50 72,60 C72,70 64,78 54,78 C44,78 36,70 36,60 C36,50 44,42 54,42 Z" />
+    <path
+        android:fillColor="#0A5B3D"
+        android:pathData="M54,48 C61,48 66,53 66,60 C66,67 61,72 54,72 C47,72 42,67 42,60 C42,53 47,48 54,48 Z" />
+    <path
+        android:fillColor="#B8E7D1"
+        android:fillAlpha="0.78"
+        android:pathData="M49,51 C52,49 56,49 58,50 C54,51 52,53 50,56 C48,56 47,54 49,51 Z" />
+
+    <!-- Scan corners -->
+    <path android:fillColor="#F4C84A" android:pathData="M14,20 h14 v3 h-11 v11 h-3 Z" />
+    <path android:fillColor="#F4C84A" android:pathData="M94,20 h-14 v3 h11 v11 h3 Z" />
+    <path android:fillColor="#F4C84A" android:pathData="M14,88 h14 v-3 h-11 v-11 h-3 Z" />
+    <path android:fillColor="#F4C84A" android:pathData="M94,88 h-14 v-3 h11 v-11 h3 Z" />
+</vector>
