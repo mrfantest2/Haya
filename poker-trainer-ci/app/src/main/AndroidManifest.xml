@@ -7,7 +7,7 @@
         android:allowBackup="true"
         android:icon="@drawable/ic_launcher"
         android:roundIcon="@drawable/ic_launcher"
-        android:label="Poker Vision"
+        android:label="${appLabel}"
         android:theme="@style/AppTheme"
         android:supportsRtl="true">
         <activity
