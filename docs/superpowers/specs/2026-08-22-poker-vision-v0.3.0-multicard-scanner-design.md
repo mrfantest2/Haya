@@ -36,6 +36,11 @@ The scanner displays two visible zones over the live CameraX preview:
 1. **BOARD** zone in the upper portion of the scan area, with five conceptual positions.
 2. **YOUR CARDS** zone in the lower portion, with two conceptual positions.
 
+Using normalized preview coordinates after excluding the fixed scanner header/footer, the initial guide rectangles are:
+
+- BOARD: `x=0.05..0.95`, `y=0.08..0.48`
+- YOUR CARDS: `x=0.18..0.82`, `y=0.58..0.92`
+
 Users can place both hole cards and the currently visible community cards in the same camera view. The board can contain 0, 3, 4, or 5 cards. The scanner must also tolerate partial/manual workflows with 1-5 board cards because users may be correcting or reconstructing a hand.
 
 Cards within each zone are assigned left-to-right after geometric normalization. A detected card is never silently committed to the poker table. Stable detections first appear in a review state.
@@ -64,7 +69,7 @@ Actions:
 
 ### Incomplete and existing table state
 
-The scanner targets the currently selected table slots but operates as a table-level scan. Existing confirmed cards remain visible as occupied slots and are protected by duplicate validation.
+The scanner operates as a table-level scan rather than a single-slot scan. Existing confirmed cards remain visible as occupied slots and are protected by duplicate validation.
 
 When a scan contains fewer than seven cards, only detected positions are proposed. Existing confirmed slots not represented by the scan are not automatically erased.
 
@@ -118,34 +123,50 @@ Use the official OpenCV Android Maven AAR:
 
 OpenCV is used for geometry, contours, perspective transforms, thresholding, and template/image comparison. Existing CameraX and ML Kit Text Recognition dependencies remain in place.
 
+### Fixed v0.3.0 vision constants
+
+The first implementation uses these exact constants so behavior is testable and tuning is explicit rather than hidden in code:
+
+- Card-discovery image long edge: `960 px` maximum.
+- Expensive recognition cadence: at most `4 frames/second`.
+- Normalized card image: `350 x 500 px`, portrait orientation.
+- Indexed-corner crop: `x=0..105`, `y=0..190` on the normalized card.
+- Candidate short-edge/long-edge ratio: `0.58..0.78`.
+- Candidate area: `1.5%..30%` of the active scanner image area.
+- Polygon must be convex with exactly four approximated corners.
+- Duplicate rectangle suppression: intersection-over-union `>= 0.70`; keep the larger contour.
+- Track association: intersection-over-union `>= 0.35`; if IoU is unavailable after rapid motion, allow center distance `<= 0.12` of the candidate diagonal.
+- Track expiry after no match: `1200 ms`.
+- High-confidence threshold: `>= 0.78`.
+- Medium/amber threshold: `>= 0.55` and `< 0.78`.
+- Below `0.55`: neutral/uncertain; not confirmable without manual correction.
+- Stable vote: same exact rank+suit in at least `4 of the latest 5` usable observations.
+- OCR-only output is capped below confirmable confidence at `0.49`.
+
+These constants may be changed only through a later explicit tuning commit backed by fixture/device evidence; v0.3.0 must not scatter magic threshold values across UI and detector classes.
+
 ### Pipeline
 
 For each eligible CameraX analysis frame:
 
 1. Convert the luminance/RGB camera frame into an OpenCV matrix without blocking the UI thread.
-2. Downscale the frame for card-rectangle discovery.
+2. Downscale the frame so its long edge is at most 960 px for card-rectangle discovery.
 3. Apply grayscale normalization and adaptive/edge thresholding.
 4. Find external contours.
-5. Approximate quadrilaterals and reject candidates outside playing-card geometry/area constraints.
+5. Approximate quadrilaterals and reject candidates outside the fixed geometry/area constraints.
 6. Map candidate coordinates back to preview coordinates.
-7. Perspective-warp each card to a normalized portrait card image.
-8. Correct orientation so the most likely indexed corner is presented consistently.
-9. Crop the rank/suit index region from the normalized card.
+7. Perspective-warp each card to a 350x500 normalized portrait image.
+8. Evaluate both indexed-corner orientations (top-left and a 180-degree rotation of the bottom-right equivalent) and retain the orientation with the stronger combined index signal.
+9. Crop the 105x190 indexed-corner region.
 10. Recognize rank and suit independently.
 11. Combine image recognition with the existing OCR parser as a secondary hint, not as the primary decision source.
 12. Feed observations into multi-frame voting.
-13. Map stable detections into board/hole zones and left-to-right slot order.
+13. Map stable/amber detections into board/hole zones and left-to-right slot order.
 14. Publish immutable pending-review state to the UI.
 
 ### Card rectangle constraints
 
-v0.3.0 is optimized for standard poker-size playing cards and similarly proportioned decks. A contour candidate must:
-
-- be a convex four-corner polygon after approximation;
-- have a normalized width/height ratio compatible with a portrait or landscape playing card after rotation;
-- exceed the configured minimum visible-frame area;
-- remain mostly inside one guided zone;
-- not be a near-duplicate contour of another candidate.
+v0.3.0 is optimized for standard poker-size playing cards and similarly proportioned decks. A contour candidate must satisfy all fixed geometry constants above, have its center inside one guided zone, and not be suppressed as a duplicate contour.
 
 Cards must be visually separated. Significant overlapping/stacked cards are explicitly out of scope for v0.3.0.
 
@@ -155,14 +176,9 @@ Rank classes are:
 
 `A, K, Q, J, 10, 9, 8, 7, 6, 5, 4, 3, 2`
 
-The normalized rank crop is converted to high-contrast binary representations and compared against bundled rank templates using scale-normalized image similarity/contour features. Existing ML Kit OCR contributes a rank hint when it returns a parsable value.
+The normalized rank region is converted to high-contrast binary representations and compared against bundled/repository-owned rank templates using scale-normalized similarity and contour features. Existing ML Kit OCR runs only on the normalized indexed-corner ROI and contributes a rank hint when it returns a parsable value.
 
-A rank result records:
-
-- predicted rank;
-- image/template score;
-- optional OCR agreement;
-- combined confidence.
+Rank confidence starts from the image/template score. If OCR agrees, add `0.10` capped at `1.00`. If OCR explicitly disagrees, subtract `0.15` floored at `0.00`. If no image/template rank is available, an OCR-only rank hint is capped at `0.49`.
 
 ### Suit recognition
 
@@ -170,42 +186,37 @@ Suit classes are:
 
 `♠, ♥, ♦, ♣`
 
-Suit recognition uses the normalized suit crop, contour topology/shape descriptors, and bundled suit templates. OCR is only a secondary hint when a suit letter or Unicode suit glyph is returned.
+Suit recognition uses the normalized suit portion of the index region, contour topology/shape descriptors, and repository-owned suit templates. OCR is only a secondary hint when a suit letter or Unicode suit glyph is returned.
 
-A suit result records:
+Suit confidence starts from the image/template score. If OCR agrees, add `0.10` capped at `1.00`. If OCR explicitly disagrees, subtract `0.15` floored at `0.00`. If no image/template suit is available, an OCR-only suit hint is capped at `0.49`.
 
-- predicted suit;
-- shape/template score;
-- optional OCR agreement;
-- combined confidence.
+Overall card confidence is `min(rankConfidence, suitConfidence)` so a card cannot become stable while either half of the identity is weak.
 
 ### Template scope
 
 v0.3.0 targets conventional high-contrast poker decks where the rank and suit are printed in an indexed corner. Bundled templates cover standard serif/sans rank forms and the four conventional suit shapes. Highly decorative decks, novelty fonts, borderless art decks, cards without indexed corners, and heavily occluded cards are not guaranteed; manual correction is the designed fallback.
 
-The implementation must keep template assets isolated so additional deck/template packs can be added later without changing table or camera architecture.
+All committed templates/fixtures must either be generated in-repository or have redistribution-compatible licensing documented alongside the assets. The implementation must keep template assets isolated so additional deck/template packs can be added later without changing table or camera architecture.
 
 ## Multi-Frame Voting
 
 Single-frame classifications do not become stable detections.
 
-Each physical candidate is tracked by geometric proximity/overlap across recent frames. A card becomes **stable** only when the same rank+suit result appears in at least 4 of the latest 5 usable observations for that tracked card and the combined confidence is at or above the high-confidence threshold.
+Each physical candidate is tracked by the fixed IoU/center-distance rules across recent frames. A card becomes **stable** only when the same rank+suit result appears in at least 4 of the latest 5 usable observations for that tracked card and overall card confidence is at least 0.78.
 
-Medium-confidence detections may appear in amber review state but are never auto-confirmed.
+Detections with confidence from 0.55 through 0.7799 appear in amber review state but are never auto-stable. Detections below 0.55 remain neutral and require better frames or manual correction.
 
-A single conflicting frame must not replace an already stable result. A stable result can change only after a new candidate wins the same 4-of-5 criterion.
-
-Tracking state expires after the candidate is absent for a short bounded window so removed cards do not persist indefinitely.
+A single conflicting frame must not replace an already stable result. A stable result can change only after a new candidate wins the same 4-of-5 criterion. A track is removed after 1200 ms without a matching physical candidate.
 
 ## Zone Mapping
 
-`TableZoneMapper` receives normalized preview-space card centers and the scanner's two zone rectangles.
+`TableZoneMapper` receives normalized preview-space card centers and the scanner's two fixed guide rectangles.
 
 Rules:
 
-- Card center in the upper BOARD zone -> board candidate.
-- Card center in the lower YOUR CARDS zone -> hole-card candidate.
-- Card center outside both zones -> unassigned and not confirmable.
+- Card center in the BOARD rectangle -> board candidate.
+- Card center in the YOUR CARDS rectangle -> hole-card candidate.
+- Card center outside both rectangles -> unassigned and not confirmable.
 - Hole candidates are sorted left-to-right and capped at 2.
 - Board candidates are sorted left-to-right and capped at 5.
 - More than the zone capacity is treated as a scan-layout error; extra cards are not guessed into slots.
@@ -225,7 +236,9 @@ Each proposed slot records:
 - source bounding quadrilateral;
 - whether the user manually corrected it.
 
-`Confirm All` validates the complete proposal against existing table cards and within-proposal duplicates, then commits valid proposals atomically. If validation fails, no partial commit occurs.
+A manually corrected proposal is considered confirmable regardless of its previous image confidence, but it remains subject to duplicate and capacity validation.
+
+`Confirm All` validates the complete proposal against existing table cards and within-proposal duplicates, then commits all valid proposals atomically. If validation fails, no partial commit occurs.
 
 ## Component Boundaries
 
@@ -241,19 +254,19 @@ Responsibility: rectangle discovery only; no rank/suit logic.
 
 Input: frame matrix plus card quadrilateral.
 
-Output: normalized, orientation-corrected card image plus indexed-corner crop metadata.
+Output: normalized 350x500 card image plus indexed-corner crop metadata.
 
 Responsibility: perspective/orientation only.
 
 ### `RankRecognizer`
 
-Input: normalized index crop.
+Input: normalized indexed-corner image.
 
 Output: rank prediction and confidence.
 
 ### `SuitRecognizer`
 
-Input: normalized index crop.
+Input: normalized indexed-corner image.
 
 Output: suit prediction and confidence.
 
@@ -261,15 +274,15 @@ Output: suit prediction and confidence.
 
 Input: rank result, suit result, optional existing ML Kit OCR hints.
 
-Output: one card observation and combined confidence.
+Output: one card observation and overall confidence.
 
-Responsibility: combine signals; OCR cannot produce a high-confidence result by itself.
+Responsibility: combine signals; OCR cannot produce a confirmable result by itself.
 
 ### `RecognitionVoteTracker`
 
 Input: timestamped geometric candidates and card observations.
 
-Output: tracked detections with unstable/amber/stable state.
+Output: tracked detections with neutral/amber/stable state according to the fixed constants.
 
 ### `TableZoneMapper`
 
@@ -285,18 +298,19 @@ Responsibility: pending proposals, correction, rescan, duplicate validation, and
 
 Responsibility: reusable two-step suit -> value selection behavior for table entry and scan correction.
 
-The implementation may remain programmatic Android Views to match the existing application; no Compose migration is part of v0.3.0.
+The implementation remains programmatic Android Views to match the existing application; no Compose migration is part of v0.3.0.
 
 ## Camera Lifecycle and Performance
 
 - Camera starts only while the scanner overlay/activity state is visible and permission is granted.
-- Camera unbinds immediately on Back/close and when the activity stops.
+- Camera unbinds immediately on Back/close and in `onStop()`.
 - Analysis remains off the main thread.
 - Only one frame can be in the expensive recognition stage at a time.
-- Rectangle discovery runs on a reduced-resolution image.
+- Expensive recognition runs no faster than 4 frames/second.
+- Rectangle discovery runs on an image with maximum 960 px long edge.
 - Detailed normalization/recognition runs only on detected card ROIs.
 - Use CameraX `STRATEGY_KEEP_ONLY_LATEST` to prevent frame backlog.
-- UI receives throttled immutable recognition-state updates rather than per-pixel/frame work.
+- UI receives immutable recognition-state updates only when candidate/status data changes or at most 6 updates/second.
 - Existing 25,000-simulation poker calculation remains outside the camera pipeline.
 
 ## Error Handling
@@ -353,12 +367,19 @@ Add deterministic JVM tests where Android/OpenCV runtime is not required for:
 - atomic review commit preparation;
 - 4-of-5 recognition voting;
 - one bad frame not replacing a stable detection;
-- tracking expiry behavior;
+- confidence threshold classification at 0.55 and 0.78 boundaries;
+- 1200 ms tracking expiry behavior;
 - existing 1-9 opponent math coverage.
 
 ### Vision fixture tests
 
-Store a small, repository-owned set of synthetic/generated test fixtures representing conventional cards under rotation, scale, perspective, and moderate brightness differences. Fixture tests must validate card rectangle geometry and rank/suit recognition for the supported template family.
+Store a small, repository-owned set of generated test fixtures representing conventional indexed cards under 0°, 90°, 180°, and 270° rotation plus mild perspective and brightness variants. Fixture tests validate:
+
+- rectangle discovery inside the 0.58..0.78 aspect-ratio window;
+- perspective normalization to 350x500;
+- indexed-corner orientation selection;
+- rank/suit recognition for every 52-card identity within the supported generated template family;
+- duplicate contour suppression at IoU >= 0.70.
 
 Do not use copyrighted third-party card artwork as committed fixtures unless its license explicitly permits repository redistribution.
 
@@ -378,7 +399,7 @@ GitHub Actions must:
 
 ### Device acceptance test
 
-Before calling scanning fixed, test on an Android camera device with a standard indexed poker deck:
+Before calling scanning fixed, test on an Android camera device with a conventional high-contrast indexed poker deck:
 
 - camera opens;
 - two hole cards plus three board cards can be visible together;
@@ -399,7 +420,7 @@ v0.3.0 is acceptable when all of the following are true:
 
 - The current B-type failure mode, where the camera opens but never produces useful card candidates on a conventional indexed poker deck, is replaced by visible multi-card rectangle detection and rank/suit proposals.
 - Two hole cards and up to five board cards can be scanned in one guided view when cards are separated and placed in their respective zones.
-- Stable recognition requires multi-frame consensus.
+- Stable recognition requires the fixed 4-of-5 multi-frame consensus at confidence >= 0.78.
 - Users review detected cards before table commit.
 - Any individual detection can be corrected without leaving the scanner.
 - Manual card entry is suit first, then value, with immediate save and automatic next-slot advance.
