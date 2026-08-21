@@ -47,11 +47,18 @@ jobs:
         working-directory: poker-trainer-ci
         run: python3 tools/apply_v028_card_tap_picker.py
 
-      - name: Verify tap-to-picker behavior is present
+      - name: Apply v0.2.9 card availability patch
+        working-directory: poker-trainer-ci
+        run: python3 tools/apply_v029_card_availability.py
+
+      - name: Verify picker behavior and used-card states
         working-directory: poker-trainer-ci
         run: |
           grep -F 'selectHole(index); showManualPicker();' app/src/main/java/com/fantest/pokervision/VisionActivityV025.java
           grep -F 'selectBoard(index); showManualPicker();' app/src/main/java/com/fantest/pokervision/VisionActivityV025.java
+          grep -F 'Already selected — choose another card' app/src/main/java/com/fantest/pokervision/VisionActivityV025.java
+          grep -F 'face.setAlpha(used ? .22f : 1f);' app/src/main/java/com/fantest/pokervision/VisionActivityV025.java
+          grep -F 'b.setAlpha(used ? .28f : 1f);' app/src/main/java/com/fantest/pokervision/VisionActivityV025.java
 
       - name: Unit tests
         working-directory: poker-trainer-ci
