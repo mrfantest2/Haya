@@ -1,13 +1,13 @@
-name: Poker Vision v0.2.10 Stable QA Signing
+name: Poker Vision v0.2.11 Final Consolidated
 
 on:
   push:
-    branches: [poker-vision-v0.2.10-signing-fix]
+    branches: [poker-vision-v0.2.11-final]
     paths:
       - 'poker-trainer-ci/**'
       - '.github/workflows/poker-vision-v0.2.0-build.yml'
   pull_request:
-    branches: [poker-vision-v0.2.9-card-availability]
+    branches: [poker-vision-v0.2.10-signing-fix]
     paths:
       - 'poker-trainer-ci/**'
       - '.github/workflows/poker-vision-v0.2.0-build.yml'
@@ -43,25 +43,18 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Apply v0.2.8 interaction patch
-        working-directory: poker-trainer-ci
-        run: python3 tools/apply_v028_card_tap_picker.py
-
-      - name: Apply v0.2.9 card availability patch
-        working-directory: poker-trainer-ci
-        run: python3 tools/apply_v029_card_availability.py
-
-      - name: Verify picker behavior and signing boundary
+      - name: Verify consolidated source
         working-directory: poker-trainer-ci
         run: |
           set -euo pipefail
-          grep -F 'selectHole(index); showManualPicker();' app/src/main/java/com/fantest/pokervision/VisionActivityV025.java
-          grep -F 'selectBoard(index); showManualPicker();' app/src/main/java/com/fantest/pokervision/VisionActivityV025.java
-          grep -F 'Already selected — choose another card' app/src/main/java/com/fantest/pokervision/VisionActivityV025.java
-          grep -F "applicationIdSuffix '.qa'" app/build.gradle
-          grep -F 'signingConfig signingConfigs.qa' app/build.gradle
-          grep -F "applicationId 'com.fantest.pokervision'" app/build.gradle
-          test -s qa/poker-vision-qa.jks
+          python3 tools/verify_final_source.py
+          test ! -e tools/apply_v028_card_tap_picker.py
+          test ! -e tools/apply_v029_card_availability.py
+          grep -F "versionCode 13" app/build.gradle
+          grep -F "versionName '0.2.11'" app/build.gradle
+          grep -F 'opponents > 9' app/src/main/java/com/fantest/pokervision/PokerMath.java
+          grep -F 'if (opponents < 9)' app/src/main/java/com/fantest/pokervision/VisionActivityV025.java
+          grep -F 'playersTotal = opponents + 1' app/src/main/java/com/fantest/pokervision/VisionActivityV025.java
 
       - name: Unit tests
         working-directory: poker-trainer-ci
@@ -83,27 +76,27 @@ jobs:
 
           "$AAPT" dump badging "$APK" | tee /tmp/badging.txt
           grep -Fq "package: name='com.fantest.pokervision.qa'" /tmp/badging.txt
-          grep -Fq "versionCode='12'" /tmp/badging.txt
-          grep -Fq "versionName='0.2.10-qa'" /tmp/badging.txt
+          grep -Fq "versionCode='13'" /tmp/badging.txt
+          grep -Fq "versionName='0.2.11-qa'" /tmp/badging.txt
           grep -Fq "application-label:'Poker Vision QA'" /tmp/badging.txt
 
       - name: Validate artifacts
         run: |
           set -euo pipefail
           mkdir -p poker-vision-dist
-          cp poker-trainer-ci/app/build/outputs/apk/debug/app-debug.apk poker-vision-dist/Poker-Vision-v0.2.10-QA.apk
-          cp poker-trainer-ci/app/build/outputs/bundle/release/app-release.aab poker-vision-dist/Poker-Vision-v0.2.10-unsigned.aab
-          test "$(stat -c%s poker-vision-dist/Poker-Vision-v0.2.10-QA.apk)" -gt 100000
-          test "$(stat -c%s poker-vision-dist/Poker-Vision-v0.2.10-unsigned.aab)" -gt 100000
-          unzip -t poker-vision-dist/Poker-Vision-v0.2.10-QA.apk >/dev/null
-          unzip -t poker-vision-dist/Poker-Vision-v0.2.10-unsigned.aab >/dev/null
-          (cd poker-vision-dist && sha256sum Poker-Vision-v0.2.10-QA.apk Poker-Vision-v0.2.10-unsigned.aab > SHA256SUMS.txt)
+          cp poker-trainer-ci/app/build/outputs/apk/debug/app-debug.apk poker-vision-dist/Poker-Vision-v0.2.11-Final-QA.apk
+          cp poker-trainer-ci/app/build/outputs/bundle/release/app-release.aab poker-vision-dist/Poker-Vision-v0.2.11-unsigned.aab
+          test "$(stat -c%s poker-vision-dist/Poker-Vision-v0.2.11-Final-QA.apk)" -gt 100000
+          test "$(stat -c%s poker-vision-dist/Poker-Vision-v0.2.11-unsigned.aab)" -gt 100000
+          unzip -t poker-vision-dist/Poker-Vision-v0.2.11-Final-QA.apk >/dev/null
+          unzip -t poker-vision-dist/Poker-Vision-v0.2.11-unsigned.aab >/dev/null
+          (cd poker-vision-dist && sha256sum Poker-Vision-v0.2.11-Final-QA.apk Poker-Vision-v0.2.11-unsigned.aab > SHA256SUMS.txt)
           cat poker-vision-dist/SHA256SUMS.txt
 
-      - name: Upload v0.2.10 artifacts
+      - name: Upload final artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Poker-Vision-v0.2.10-stable-qa-signing
+          name: Poker-Vision-v0.2.11-final-consolidated
           path: poker-vision-dist/*
           if-no-files-found: error
           retention-days: 30

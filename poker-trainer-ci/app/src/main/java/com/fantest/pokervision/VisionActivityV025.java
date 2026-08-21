@@ -173,7 +173,7 @@ public final class VisionActivityV025 extends ComponentActivity {
         for (int i = 0; i < holeViews.length; i++) {
             final int index = i;
             holeViews[i] = slotCard(false);
-            holeViews[i].setOnClickListener(v -> selectHole(index));
+            holeViews[i].setOnClickListener(v -> { selectHole(index); showManualPicker(); });
             holeViews[i].setOnLongClickListener(v -> { selectHole(index); clearSelectedCard(); return true; });
             holeRow.addView(holeViews[i], new LinearLayout.LayoutParams(dp(68), dp(84)));
             if (i < holeViews.length - 1) holeRow.addView(space(8));
@@ -190,7 +190,7 @@ public final class VisionActivityV025 extends ComponentActivity {
         for (int i = 0; i < boardViews.length; i++) {
             final int index = i;
             boardViews[i] = slotCard(true);
-            boardViews[i].setOnClickListener(v -> selectBoard(index));
+            boardViews[i].setOnClickListener(v -> { selectBoard(index); showManualPicker(); });
             boardViews[i].setOnLongClickListener(v -> { selectBoard(index); clearSelectedCard(); return true; });
             boardRow.addView(boardViews[i], new LinearLayout.LayoutParams(dp(52), dp(70)));
             if (i < boardViews.length - 1) boardRow.addView(space(5));
@@ -235,7 +235,7 @@ public final class VisionActivityV025 extends ComponentActivity {
         stepper.setBackground(rounded(PANEL, 12));
         Button minus = squareButton("−"), plus = squareButton("+");
         minus.setOnClickListener(v -> { if (opponents > 1) { opponents--; updateOpponentText(); invalidateResult(); } });
-        plus.setOnClickListener(v -> { if (opponents < 5) { opponents++; updateOpponentText(); invalidateResult(); } });
+        plus.setOnClickListener(v -> { if (opponents < 9) { opponents++; updateOpponentText(); invalidateResult(); } });
         opponentsText = text("", 12, Color.WHITE, true);
         opponentsText.setGravity(Gravity.CENTER);
         stepper.addView(minus, new LinearLayout.LayoutParams(dp(36), dp(36)));
@@ -428,23 +428,48 @@ public final class VisionActivityV025 extends ComponentActivity {
 
         CardFaceView preview = new CardFaceView(this);
         preview.setCompact(false);
+        TextView availabilityStatus = text("", 11, RED, true);
+        availabilityStatus.setGravity(Gravity.CENTER);
+        final Button[] saveButton = {null};
 
         Runnable refreshSelection = () -> {
+            PokerMath.Card currentSlotCard = table.selectedCard();
             for (Button b : rankButtons) {
                 int rank = (Integer)b.getTag();
+                boolean anyAvailable = false;
+                for (int suit = 0; suit < 4; suit++) {
+                    PokerMath.Card option = new PokerMath.Card(rank, suit);
+                    if (!CardAvailability.isUsedElsewhere(option, currentSlotCard, table.holeCards(), table.boardCards())) {
+                        anyAvailable = true;
+                        break;
+                    }
+                }
                 boolean on = rank == selectedRank[0];
-                b.setAlpha(on ? 1f : .52f);
-                b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(on ? PANEL2 : Color.rgb(222, 228, 225)));
-                b.setTextColor(on ? Color.WHITE : BG);
+                b.setEnabled(anyAvailable);
+                b.setAlpha(anyAvailable ? (on ? 1f : .52f) : .22f);
+                b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(on && anyAvailable ? PANEL2 : Color.rgb(222, 228, 225)));
+                b.setTextColor(anyAvailable ? (on ? Color.WHITE : BG) : Color.GRAY);
             }
             for (Button b : suitButtons) {
                 int suit = (Integer)b.getTag();
+                PokerMath.Card option = new PokerMath.Card(selectedRank[0], suit);
+                boolean used = CardAvailability.isUsedElsewhere(option, currentSlotCard, table.holeCards(), table.boardCards());
                 boolean on = suit == selectedSuit[0];
-                b.setAlpha(on ? 1f : .52f);
-                b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(on ? PANEL2 : Color.rgb(222, 228, 225)));
-                b.setTextColor((suit == 1 || suit == 2) ? RED : Color.BLACK);
+                b.setEnabled(!used);
+                b.setAlpha(used ? .22f : (on ? 1f : .52f));
+                b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(on && !used ? PANEL2 : Color.rgb(222, 228, 225)));
+                b.setTextColor(used ? Color.GRAY : ((suit == 1 || suit == 2) ? RED : Color.BLACK));
             }
-            preview.setCard(new PokerMath.Card(selectedRank[0], selectedSuit[0]));
+            PokerMath.Card candidate = new PokerMath.Card(selectedRank[0], selectedSuit[0]);
+            boolean used = CardAvailability.isUsedElsewhere(candidate, currentSlotCard, table.holeCards(), table.boardCards());
+            preview.setCard(candidate);
+            preview.setAlpha(used ? .25f : 1f);
+            availabilityStatus.setText(used ? (arabic ? "هذه البطاقة مستخدمة بالفعل" : "Already selected — choose another card") : "");
+            availabilityStatus.setVisibility(used ? View.VISIBLE : View.INVISIBLE);
+            if (saveButton[0] != null) {
+                saveButton[0].setEnabled(!used);
+                saveButton[0].setAlpha(used ? .42f : 1f);
+            }
         };
 
         int[][] rankRows = {{14,13,12,11,10,9,8}, {7,6,5,4,3,2}};
@@ -478,7 +503,8 @@ public final class VisionActivityV025 extends ComponentActivity {
         previewHolder.setBackground(rounded(Color.rgb(248, 248, 248), 12));
         FrameLayout.LayoutParams previewLp = new FrameLayout.LayoutParams(dp(82), dp(108), Gravity.CENTER);
         previewHolder.addView(preview, previewLp);
-        box.addView(previewHolder, lp(-1, dp(120), 0, 0, 0, 10));
+        box.addView(previewHolder, lp(-1, dp(120), 0, 0, 0, 4));
+        box.addView(availabilityStatus, lp(-1, dp(24), 0, 0, 0, 6));
 
         LinearLayout bottom = row();
         Button remove = dialogSecondaryButton(arabic ? "حذف" : "Remove");
@@ -488,8 +514,14 @@ public final class VisionActivityV025 extends ComponentActivity {
         Button done = dialogSecondaryButton(arabic ? "تم" : "Done");
         done.setOnClickListener(v -> dialog.dismiss());
         Button add = dialogPrimaryButton(existing == null ? (arabic ? "إضافة" : "Add") : (arabic ? "استبدال" : "Replace"));
+        saveButton[0] = add;
         add.setOnClickListener(v -> {
             PokerMath.Card c = new PokerMath.Card(selectedRank[0], selectedSuit[0]);
+            if (CardAvailability.isUsedElsewhere(c, table.selectedCard(), table.holeCards(), table.boardCards())) {
+                toast(arabic ? "هذه البطاقة مستخدمة بالفعل" : "That card is already selected");
+                refreshSelection.run();
+                return;
+            }
             if (placeSelected(c, true)) {
                 toast(arabic ? "تم حفظ البطاقة" : c.pretty() + " saved");
                 dialog.dismiss();
@@ -560,12 +592,18 @@ public final class VisionActivityV025 extends ComponentActivity {
                     CardFaceView face = new CardFaceView(this);
                     face.setCompact(true);
                     face.setCard(c);
-                    face.setOnClickListener(v -> {
-                        if (placeSelected(c, true)) {
-                            toast((arabic ? "تمت إضافة " : "Added ") + c.pretty());
-                            dialog.dismiss();
-                        }
-                    });
+                    boolean used = CardAvailability.isUsedElsewhere(c, table.selectedCard(), table.holeCards(), table.boardCards());
+                    face.setEnabled(!used);
+                    face.setAlpha(used ? .22f : 1f);
+                    face.setContentDescription(used ? (arabic ? "بطاقة مستخدمة" : "Card already selected") : c.pretty());
+                    if (!used) {
+                        face.setOnClickListener(v -> {
+                            if (placeSelected(c, true)) {
+                                toast((arabic ? "تمت إضافة " : "Added ") + c.pretty());
+                                dialog.dismiss();
+                            }
+                        });
+                    }
                     cards.addView(face, new LinearLayout.LayoutParams(dp(54), dp(74)));
                     cards.addView(space(4));
                 }
@@ -749,13 +787,18 @@ public final class VisionActivityV025 extends ComponentActivity {
         candidates.removeAllViews();
         for (PokerMath.Card c : cards) {
             Button b = cardCandidateButton(c);
-            b.setOnClickListener(v -> {
-                if (placeSelected(c, true)) {
-                    toast((arabic ? "تم حفظ " : "Saved ") + c.pretty());
-                    updateScannerTarget();
-                    if (table.holeComplete() && table.boardComplete()) closeScanner();
-                }
-            });
+            boolean used = CardAvailability.isUsedElsewhere(c, table.selectedCard(), table.holeCards(), table.boardCards());
+            b.setEnabled(!used);
+            b.setAlpha(used ? .28f : 1f);
+            if (!used) {
+                b.setOnClickListener(v -> {
+                    if (placeSelected(c, true)) {
+                        toast((arabic ? "تم حفظ " : "Saved ") + c.pretty());
+                        updateScannerTarget();
+                        if (table.holeComplete() && table.boardComplete()) closeScanner();
+                    }
+                });
+            }
             candidates.addView(b);
             candidates.addView(space(6));
         }
@@ -809,7 +852,7 @@ public final class VisionActivityV025 extends ComponentActivity {
         resultWin.setText(arabic ? "فوز\n—" : "WIN\n—");
         resultTie.setText(arabic ? "تعادل\n—" : "TIE\n—");
         resultLose.setText(arabic ? "خسارة\n—" : "LOSE\n—");
-        resultDetail.setText(arabic ? "اضغط خانة بطاقة، ثم استخدم المسح أو اليدوي أو الدليل." : "Tap a card slot, then use Scan, Manual or Guide.");
+        resultDetail.setText(arabic ? "اضغط أي بطاقة أو خانة فارغة لفتح اختيار البطاقة مباشرة." : "Tap any card or empty slot to open the card picker directly.");
         resultMeta.setText(arabic ? "الكاميرا تبقى متوقفة حتى تفتح شاشة المسح." : "Camera stays off until you open the scanner.");
         applyResultDirection();
     }
@@ -827,9 +870,10 @@ public final class VisionActivityV025 extends ComponentActivity {
             String draw = arabic ? drawArabic(r.draws) : r.draws;
             resultDetail.setText(arabic ? draw + " • بطاقات تحسين اليد " + r.outs : draw + " • hand-improving cards " + r.outs);
         }
+        int playersTotal = opp + 1;
         resultMeta.setText(arabic
-                ? String.format(Locale.US, "ضد %d %s • %,d محاكاة", opp, opp == 1 ? "خصم" : "خصوم", r.simulations)
-                : String.format(Locale.US, "%d opponent%s • %,d simulations", opp, opp == 1 ? "" : "s", r.simulations));
+                ? String.format(Locale.US, "%d لاعبين • %,d محاكاة", playersTotal, r.simulations)
+                : String.format(Locale.US, "%d players • %,d simulations", playersTotal, r.simulations));
         applyResultDirection();
     }
 
@@ -880,7 +924,7 @@ public final class VisionActivityV025 extends ComponentActivity {
         if (language == null) return;
         dashboard.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);
         language.setText(arabic ? "English" : "عربي");
-        modeHint.setText(arabic ? "اضغط أي خانة لاختيارها • ضغطة مطولة لمسح البطاقة." : "Tap any slot to select it • long-press a filled slot to clear.");
+        modeHint.setText(arabic ? "اضغط أي بطاقة أو خانة لاختيارها مباشرة • ضغطة مطولة لمسح البطاقة." : "Tap any card or empty slot to choose it directly • long-press a filled slot to clear.");
         modeHint.setTextDirection(arabic ? View.TEXT_DIRECTION_RTL : View.TEXT_DIRECTION_LTR);
         modeHint.setGravity(arabic ? Gravity.RIGHT : Gravity.LEFT);
         scanButton.setText(arabic ? "مسح" : "Scan");
@@ -905,7 +949,12 @@ public final class VisionActivityV025 extends ComponentActivity {
 
     private void updateOpponentText() {
         if (opponentsText == null) return;
-        opponentsText.setText(arabic ? opponents + (opponents == 1 ? " خصم" : " خصوم") : opponents + (opponents == 1 ? " opponent" : " opponents"));
+        int playersTotal = opponents + 1;
+        if (arabic) {
+            opponentsText.setText(playersTotal == 2 ? "لاعبان" : playersTotal + " لاعبين");
+        } else {
+            opponentsText.setText(playersTotal + (playersTotal == 1 ? " player" : " players"));
+        }
     }
 
     @Override public void onRequestPermissionsResult(int req, @NonNull String[] permissions, @NonNull int[] grants) {

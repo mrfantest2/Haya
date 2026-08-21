@@ -40,7 +40,7 @@ public final class PokerMath {
     public static Result calculate(List<Card> hole, List<Card> board, int opponents, int simulations, long seed) {
         if (hole.size() != 2) throw new IllegalArgumentException("Exactly two hole cards are required");
         if (board.size() > 5) throw new IllegalArgumentException("Board cannot exceed five cards");
-        if (opponents < 1 || opponents > 5) throw new IllegalArgumentException("Opponents must be 1-5");
+        if (opponents < 1 || opponents > 9) throw new IllegalArgumentException("Opponents must be 1-9");
         Set<Card> known = new HashSet<>(); known.addAll(hole); known.addAll(board);
         if (known.size() != hole.size() + board.size()) throw new IllegalArgumentException("Duplicate cards detected");
         int need = opponents * 2 + (5 - board.size());
