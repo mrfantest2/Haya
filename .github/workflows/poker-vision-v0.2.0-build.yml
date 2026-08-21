@@ -1,13 +1,13 @@
-name: Poker Vision v0.2.8 Card Tap Picker
+name: Poker Vision v0.2.9 Card Availability
 
 on:
   push:
-    branches: [poker-vision-v0.2.8-card-tap-picker]
+    branches: [poker-vision-v0.2.9-card-availability]
     paths:
       - 'poker-trainer-ci/**'
       - '.github/workflows/poker-vision-v0.2.0-build.yml'
   pull_request:
-    branches: [poker-vision-v0.2.7-play-final]
+    branches: [poker-vision-v0.2.8-card-tap-picker]
     paths:
       - 'poker-trainer-ci/**'
       - '.github/workflows/poker-vision-v0.2.0-build.yml'
@@ -47,11 +47,18 @@ jobs:
         working-directory: poker-trainer-ci
         run: python3 tools/apply_v028_card_tap_picker.py
 
-      - name: Verify tap-to-picker behavior is present
+      - name: Apply v0.2.9 card availability patch
+        working-directory: poker-trainer-ci
+        run: python3 tools/apply_v029_card_availability.py
+
+      - name: Verify picker behavior and used-card states
         working-directory: poker-trainer-ci
         run: |
           grep -F 'selectHole(index); showManualPicker();' app/src/main/java/com/fantest/pokervision/VisionActivityV025.java
           grep -F 'selectBoard(index); showManualPicker();' app/src/main/java/com/fantest/pokervision/VisionActivityV025.java
+          grep -F 'Already selected — choose another card' app/src/main/java/com/fantest/pokervision/VisionActivityV025.java
+          grep -F 'face.setAlpha(used ? .22f : 1f);' app/src/main/java/com/fantest/pokervision/VisionActivityV025.java
+          grep -F 'b.setAlpha(used ? .28f : 1f);' app/src/main/java/com/fantest/pokervision/VisionActivityV025.java
 
       - name: Unit tests
         working-directory: poker-trainer-ci
@@ -65,19 +72,19 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p poker-vision-dist
-          cp poker-trainer-ci/app/build/outputs/apk/debug/app-debug.apk poker-vision-dist/Poker-Vision-v0.2.8.apk
-          cp poker-trainer-ci/app/build/outputs/bundle/release/app-release.aab poker-vision-dist/Poker-Vision-v0.2.8-unsigned.aab
-          test "$(stat -c%s poker-vision-dist/Poker-Vision-v0.2.8.apk)" -gt 100000
-          test "$(stat -c%s poker-vision-dist/Poker-Vision-v0.2.8-unsigned.aab)" -gt 100000
-          unzip -t poker-vision-dist/Poker-Vision-v0.2.8.apk >/dev/null
-          unzip -t poker-vision-dist/Poker-Vision-v0.2.8-unsigned.aab >/dev/null
-          (cd poker-vision-dist && sha256sum Poker-Vision-v0.2.8.apk Poker-Vision-v0.2.8-unsigned.aab > SHA256SUMS.txt)
+          cp poker-trainer-ci/app/build/outputs/apk/debug/app-debug.apk poker-vision-dist/Poker-Vision-v0.2.9.apk
+          cp poker-trainer-ci/app/build/outputs/bundle/release/app-release.aab poker-vision-dist/Poker-Vision-v0.2.9-unsigned.aab
+          test "$(stat -c%s poker-vision-dist/Poker-Vision-v0.2.9.apk)" -gt 100000
+          test "$(stat -c%s poker-vision-dist/Poker-Vision-v0.2.9-unsigned.aab)" -gt 100000
+          unzip -t poker-vision-dist/Poker-Vision-v0.2.9.apk >/dev/null
+          unzip -t poker-vision-dist/Poker-Vision-v0.2.9-unsigned.aab >/dev/null
+          (cd poker-vision-dist && sha256sum Poker-Vision-v0.2.9.apk Poker-Vision-v0.2.9-unsigned.aab > SHA256SUMS.txt)
           cat poker-vision-dist/SHA256SUMS.txt
 
-      - name: Upload v0.2.8 artifacts
+      - name: Upload v0.2.9 artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Poker-Vision-v0.2.8-card-tap-picker
+          name: Poker-Vision-v0.2.9-card-availability
           path: poker-vision-dist/*
           if-no-files-found: error
           retention-days: 30
