@@ -10,12 +10,31 @@ android {
         applicationId 'com.fantest.pokervision'
         minSdk 24
         targetSdk 36
-        versionCode 11
-        versionName '0.2.9'
+        versionCode 12
+        versionName '0.2.10'
+    }
+
+    signingConfigs {
+        qa {
+            // Public/non-production signer used only with the .qa applicationId suffix.
+            storeFile file('../qa/poker-vision-qa.jks')
+            storePassword 'PokerVisionQA2026'
+            keyAlias 'poker-vision-qa'
+            keyPassword 'PokerVisionQA2026'
+        }
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix '.qa'
+            versionNameSuffix '-qa'
+            signingConfig signingConfigs.qa
+            manifestPlaceholders = [appLabel: 'Poker Vision QA']
+        }
         release {
+            // Production remains com.fantest.pokervision and must use the private
+            // Google Play/upload key rather than the public QA signer above.
+            manifestPlaceholders = [appLabel: 'Poker Vision']
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
