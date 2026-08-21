@@ -13,8 +13,8 @@ checks = {
     'UI permits nine opponents': 'if (opponents < 9)' in activity,
     'UI presents player total': 'playersTotal = opponents + 1' in activity,
     'math permits nine opponents': 'opponents > 9' in math,
-    'v0.2.8 patch is not applied during build': 'apply_v028_card_tap_picker.py' not in workflow,
-    'v0.2.9 patch is not applied during build': 'apply_v029_card_availability.py' not in workflow,
+    'v0.2.8 patch is not executed during build': 'python3 tools/apply_v028_card_tap_picker.py' not in workflow,
+    'v0.2.9 patch is not executed during build': 'python3 tools/apply_v029_card_availability.py' not in workflow,
 }
 
 failed = [name for name, ok in checks.items() if not ok]
