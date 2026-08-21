@@ -12,29 +12,18 @@ final class CardAvailability {
             List<PokerMath.Card> boardCards) {
         if (candidate == null) return false;
 
-        boolean currentOccurrenceSkipped = false;
-        currentOccurrenceSkipped = scan(candidate, currentSlotCard, holeCards, currentOccurrenceSkipped);
-        if (currentOccurrenceSkipped == USED_ELSEWHERE) return true;
-        return scan(candidate, currentSlotCard, boardCards, currentOccurrenceSkipped) == USED_ELSEWHERE;
+        int matches = countMatches(candidate, holeCards) + countMatches(candidate, boardCards);
+        if (same(candidate, currentSlotCard) && matches > 0) matches--;
+        return matches > 0;
     }
 
-    private static final boolean USED_ELSEWHERE = true;
-
-    private static boolean scan(
-            PokerMath.Card candidate,
-            PokerMath.Card currentSlotCard,
-            List<PokerMath.Card> cards,
-            boolean currentOccurrenceSkipped) {
-        if (cards == null) return currentOccurrenceSkipped;
+    private static int countMatches(PokerMath.Card candidate, List<PokerMath.Card> cards) {
+        if (cards == null) return 0;
+        int count = 0;
         for (PokerMath.Card card : cards) {
-            if (!same(candidate, card)) continue;
-            if (!currentOccurrenceSkipped && same(candidate, currentSlotCard)) {
-                currentOccurrenceSkipped = true;
-                continue;
-            }
-            return USED_ELSEWHERE;
+            if (same(candidate, card)) count++;
         }
-        return currentOccurrenceSkipped;
+        return count;
     }
 
     private static boolean same(PokerMath.Card a, PokerMath.Card b) {
