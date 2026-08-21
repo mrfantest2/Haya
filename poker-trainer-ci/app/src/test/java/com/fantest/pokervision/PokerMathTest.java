@@ -29,4 +29,24 @@ public class PokerMathTest {
         assertTrue(r.equity >= 0.0 && r.equity <= 100.0);
         assertEquals("High Card", r.currentHand);
     }
+
+    @Test public void tenPlayerTableSupportsNineOpponents() {
+        List<PokerMath.Card> hole = Arrays.asList(
+                new PokerMath.Card(14,0), new PokerMath.Card(13,1));
+        List<PokerMath.Card> board = Arrays.asList(
+                new PokerMath.Card(2,0), new PokerMath.Card(7,1), new PokerMath.Card(9,2));
+
+        PokerMath.Result r = PokerMath.calculate(hole, board, 9, 20, 20260822L);
+
+        assertEquals(20, r.simulations);
+        assertEquals(100.0, r.win + r.tie + r.lose, 0.01);
+        assertTrue(r.equity >= 0.0 && r.equity <= 100.0);
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void elevenPlayerTableIsRejected() {
+        List<PokerMath.Card> hole = Arrays.asList(
+                new PokerMath.Card(14,0), new PokerMath.Card(13,1));
+        PokerMath.calculate(hole, Collections.emptyList(), 10, 1, 1L);
+    }
 }
