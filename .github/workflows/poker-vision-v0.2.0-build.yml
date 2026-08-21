@@ -6,6 +6,11 @@ on:
     paths:
       - 'poker-trainer-ci/**'
       - '.github/workflows/poker-vision-v0.2.0-build.yml'
+  pull_request:
+    branches: [poker-vision-v0.2.10-signing-fix]
+    paths:
+      - 'poker-trainer-ci/**'
+      - '.github/workflows/poker-vision-v0.2.0-build.yml'
   workflow_dispatch:
 
 permissions:
