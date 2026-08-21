@@ -1,8 +1,8 @@
-name: Poker Vision v0.2.7 Play Release
+name: Poker Vision v0.2.8 Card Tap Picker
 
 on:
   push:
-    branches: [poker-vision-v0.2.0, poker-vision-v0.2.7-play-release]
+    branches: [poker-vision-v0.2.8-card-tap-picker]
     paths:
       - 'poker-trainer-ci/**'
       - '.github/workflows/poker-vision-v0.2.0-build.yml'
@@ -38,6 +38,16 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
+      - name: Apply v0.2.8 interaction patch
+        working-directory: poker-trainer-ci
+        run: python3 tools/apply_v028_card_tap_picker.py
+
+      - name: Verify tap-to-picker behavior is present
+        working-directory: poker-trainer-ci
+        run: |
+          grep -F 'selectHole(index); showManualPicker();' app/src/main/java/com/fantest/pokervision/VisionActivityV025.java
+          grep -F 'selectBoard(index); showManualPicker();' app/src/main/java/com/fantest/pokervision/VisionActivityV025.java
+
       - name: Unit tests
         working-directory: poker-trainer-ci
         run: gradle --no-daemon testDebugUnitTest --stacktrace
@@ -50,19 +60,19 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p poker-vision-dist
-          cp poker-trainer-ci/app/build/outputs/apk/debug/app-debug.apk poker-vision-dist/Poker-Vision-v0.2.7.apk
-          cp poker-trainer-ci/app/build/outputs/bundle/release/app-release.aab poker-vision-dist/Poker-Vision-v0.2.7-unsigned.aab
-          test "$(stat -c%s poker-vision-dist/Poker-Vision-v0.2.7.apk)" -gt 100000
-          test "$(stat -c%s poker-vision-dist/Poker-Vision-v0.2.7-unsigned.aab)" -gt 100000
-          unzip -t poker-vision-dist/Poker-Vision-v0.2.7.apk >/dev/null
-          unzip -t poker-vision-dist/Poker-Vision-v0.2.7-unsigned.aab >/dev/null
-          (cd poker-vision-dist && sha256sum Poker-Vision-v0.2.7.apk Poker-Vision-v0.2.7-unsigned.aab > SHA256SUMS.txt)
+          cp poker-trainer-ci/app/build/outputs/apk/debug/app-debug.apk poker-vision-dist/Poker-Vision-v0.2.8.apk
+          cp poker-trainer-ci/app/build/outputs/bundle/release/app-release.aab poker-vision-dist/Poker-Vision-v0.2.8-unsigned.aab
+          test "$(stat -c%s poker-vision-dist/Poker-Vision-v0.2.8.apk)" -gt 100000
+          test "$(stat -c%s poker-vision-dist/Poker-Vision-v0.2.8-unsigned.aab)" -gt 100000
+          unzip -t poker-vision-dist/Poker-Vision-v0.2.8.apk >/dev/null
+          unzip -t poker-vision-dist/Poker-Vision-v0.2.8-unsigned.aab >/dev/null
+          (cd poker-vision-dist && sha256sum Poker-Vision-v0.2.8.apk Poker-Vision-v0.2.8-unsigned.aab > SHA256SUMS.txt)
           cat poker-vision-dist/SHA256SUMS.txt
 
-      - name: Upload Play release artifacts
+      - name: Upload v0.2.8 artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Poker-Vision-v0.2.7-play-release
+          name: Poker-Vision-v0.2.8-card-tap-picker
           path: poker-vision-dist/*
           if-no-files-found: error
           retention-days: 30
