@@ -1,4 +1,4 @@
-name: Poker Vision v0.2.11 Finalization Contract
+name: Poker Vision v0.2.11 Final Consolidated
 
 on:
   push:
@@ -17,18 +17,9 @@ permissions:
   contents: read
 
 jobs:
-  source-contract:
+  build:
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Verify final source is self-contained
-        working-directory: poker-trainer-ci
-        run: python3 tools/verify_final_source.py
-
-  unit-tests:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,6 +43,60 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Run unit tests
+      - name: Verify consolidated source
+        working-directory: poker-trainer-ci
+        run: |
+          set -euo pipefail
+          python3 tools/verify_final_source.py
+          test ! -e tools/apply_v028_card_tap_picker.py
+          test ! -e tools/apply_v029_card_availability.py
+          grep -F "versionCode 13" app/build.gradle
+          grep -F "versionName '0.2.11'" app/build.gradle
+          grep -F 'opponents > 9' app/src/main/java/com/fantest/pokervision/PokerMath.java
+          grep -F 'if (opponents < 9)' app/src/main/java/com/fantest/pokervision/VisionActivityV025.java
+          grep -F 'playersTotal = opponents + 1' app/src/main/java/com/fantest/pokervision/VisionActivityV025.java
+
+      - name: Unit tests
         working-directory: poker-trainer-ci
         run: gradle --no-daemon testDebugUnitTest --stacktrace
+
+      - name: Build QA APK and unsigned Play bundle
+        working-directory: poker-trainer-ci
+        run: gradle --no-daemon assembleDebug bundleRelease --stacktrace
+
+      - name: Verify stable QA signature and package
+        run: |
+          set -euo pipefail
+          APK='poker-trainer-ci/app/build/outputs/apk/debug/app-debug.apk'
+          APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          AAPT="$ANDROID_HOME/build-tools/35.0.0/aapt"
+
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee /tmp/apksigner.txt
+          grep -Fqi '1dc111849c13619ff7ea0659e293b9079935fba071835682357fd84117b60710' /tmp/apksigner.txt
+
+          "$AAPT" dump badging "$APK" | tee /tmp/badging.txt
+          grep -Fq "package: name='com.fantest.pokervision.qa'" /tmp/badging.txt
+          grep -Fq "versionCode='13'" /tmp/badging.txt
+          grep -Fq "versionName='0.2.11-qa'" /tmp/badging.txt
+          grep -Fq "application-label:'Poker Vision QA'" /tmp/badging.txt
+
+      - name: Validate artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p poker-vision-dist
+          cp poker-trainer-ci/app/build/outputs/apk/debug/app-debug.apk poker-vision-dist/Poker-Vision-v0.2.11-Final-QA.apk
+          cp poker-trainer-ci/app/build/outputs/bundle/release/app-release.aab poker-vision-dist/Poker-Vision-v0.2.11-unsigned.aab
+          test "$(stat -c%s poker-vision-dist/Poker-Vision-v0.2.11-Final-QA.apk)" -gt 100000
+          test "$(stat -c%s poker-vision-dist/Poker-Vision-v0.2.11-unsigned.aab)" -gt 100000
+          unzip -t poker-vision-dist/Poker-Vision-v0.2.11-Final-QA.apk >/dev/null
+          unzip -t poker-vision-dist/Poker-Vision-v0.2.11-unsigned.aab >/dev/null
+          (cd poker-vision-dist && sha256sum Poker-Vision-v0.2.11-Final-QA.apk Poker-Vision-v0.2.11-unsigned.aab > SHA256SUMS.txt)
+          cat poker-vision-dist/SHA256SUMS.txt
+
+      - name: Upload final artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Poker-Vision-v0.2.11-final-consolidated
+          path: poker-vision-dist/*
+          if-no-files-found: error
+          retention-days: 30
