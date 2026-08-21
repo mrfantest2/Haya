@@ -1,0 +1,86 @@
+name: Poker Vision v0.2.11 Bake Final Source
+
+on:
+  push:
+    branches: [poker-vision-v0.2.11-final]
+    paths:
+      - '.github/workflows/poker-vision-v0.2.11-bake.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  bake:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout final branch
+        uses: actions/checkout@v4
+        with:
+          ref: poker-vision-v0.2.11-final
+          fetch-depth: 0
+
+      - name: Bake v0.2.8 and v0.2.9 behavior into source
+        working-directory: poker-trainer-ci
+        run: |
+          python3 tools/apply_v028_card_tap_picker.py
+          python3 tools/apply_v029_card_availability.py
+
+      - name: Add ten-player support and bump v0.2.11
+        working-directory: poker-trainer-ci
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          activity_path = Path('app/src/main/java/com/fantest/pokervision/VisionActivityV025.java')
+          activity = activity_path.read_text(encoding='utf-8')
+
+          replacements = {
+              'plus.setOnClickListener(v -> { if (opponents < 5) { opponents++; updateOpponentText(); invalidateResult(); } });':
+                  'plus.setOnClickListener(v -> { if (opponents < 9) { opponents++; updateOpponentText(); invalidateResult(); } });',
+              '''    private void updateOpponentText() {\n        if (opponentsText == null) return;\n        opponentsText.setText(arabic ? opponents + (opponents == 1 ? " خصم" : " خصوم") : opponents + (opponents == 1 ? " opponent" : " opponents"));\n    }''':
+                  '''    private void updateOpponentText() {\n        if (opponentsText == null) return;\n        int playersTotal = opponents + 1;\n        if (arabic) {\n            opponentsText.setText(playersTotal == 2 ? "لاعبان" : playersTotal + " لاعبين");\n        } else {\n            opponentsText.setText(playersTotal + (playersTotal == 1 ? " player" : " players"));\n        }\n    }''',
+              '''        resultMeta.setText(arabic\n                ? String.format(Locale.US, "ضد %d %s • %,d محاكاة", opp, opp == 1 ? "خصم" : "خصوم", r.simulations)\n                : String.format(Locale.US, "%d opponent%s • %,d simulations", opp, opp == 1 ? "" : "s", r.simulations));''':
+                  '''        int playersTotal = opp + 1;\n        resultMeta.setText(arabic\n                ? String.format(Locale.US, "%d لاعبين • %,d محاكاة", playersTotal, r.simulations)\n                : String.format(Locale.US, "%d players • %,d simulations", playersTotal, r.simulations));''',
+          }
+
+          for old, new in replacements.items():
+              if old not in activity:
+                  raise SystemExit('Expected activity fragment not found: ' + old[:120])
+              activity = activity.replace(old, new, 1)
+          activity_path.write_text(activity, encoding='utf-8')
+
+          math_path = Path('app/src/main/java/com/fantest/pokervision/PokerMath.java')
+          math = math_path.read_text(encoding='utf-8')
+          old_math = 'if (opponents < 1 || opponents > 5) throw new IllegalArgumentException("Opponents must be 1-5");'
+          new_math = 'if (opponents < 1 || opponents > 9) throw new IllegalArgumentException("Opponents must be 1-9");'
+          if old_math not in math:
+              raise SystemExit('Expected PokerMath opponent limit not found')
+          math_path.write_text(math.replace(old_math, new_math, 1), encoding='utf-8')
+
+          gradle_path = Path('app/build.gradle')
+          gradle = gradle_path.read_text(encoding='utf-8')
+          if "versionCode 12" not in gradle or "versionName '0.2.10'" not in gradle:
+              raise SystemExit('Expected v0.2.10 Gradle version not found')
+          gradle = gradle.replace('versionCode 12', 'versionCode 13', 1)
+          gradle = gradle.replace("versionName '0.2.10'", "versionName '0.2.11'", 1)
+          gradle_path.write_text(gradle, encoding='utf-8')
+          PY
+
+      - name: Remove migration-only patch scripts and this bake workflow
+        run: |
+          rm poker-trainer-ci/tools/apply_v028_card_tap_picker.py
+          rm poker-trainer-ci/tools/apply_v029_card_availability.py
+          rm .github/workflows/poker-vision-v0.2.11-bake.yml
+
+      - name: Verify baked source before commit
+        working-directory: poker-trainer-ci
+        run: python3 tools/verify_final_source.py
+
+      - name: Commit baked final source
+        run: |
+          git config user.name 'Poker Vision Finalizer'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'feat: consolidate Poker Vision v0.2.11 final source'
+          git push origin HEAD:poker-vision-v0.2.11-final
