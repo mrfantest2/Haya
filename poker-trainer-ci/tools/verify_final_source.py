@@ -1,24 +1,28 @@
 from pathlib import Path
 
-activity = Path('app/src/main/java/com/fantest/pokervision/VisionActivityV025.java').read_text(encoding='utf-8')
+activity_path = Path('app/src/main/java/com/fantest/pokervision/VisionActivityV030.java')
+activity = activity_path.read_text(encoding='utf-8') if activity_path.exists() else ''
 math = Path('app/src/main/java/com/fantest/pokervision/PokerMath.java').read_text(encoding='utf-8')
+gradle = Path('app/build.gradle').read_text(encoding='utf-8')
 workflow = Path('../.github/workflows/poker-vision-v0.2.0-build.yml').read_text(encoding='utf-8')
 
 checks = {
-    'hole-card tap opens picker directly': 'selectHole(index); showManualPicker();' in activity,
-    'board-card tap opens picker directly': 'selectBoard(index); showManualPicker();' in activity,
-    'manual picker blocks already-selected card': 'Already selected — choose another card' in activity,
-    'guide greys already-selected card': 'face.setAlpha(used ? .22f : 1f);' in activity,
-    'scanner greys already-selected candidate': 'b.setAlpha(used ? .28f : 1f);' in activity,
-    'UI permits nine opponents': 'if (opponents < 9)' in activity,
-    'UI presents player total': 'playersTotal = opponents + 1' in activity,
+    'versionCode 14': 'versionCode 14' in gradle,
+    'versionName 0.3.0': "versionName '0.3.0'" in gradle,
+    'OpenCV 4.14.0': "implementation 'org.opencv:opencv:4.14.0'" in gradle,
+    'vision pipeline class': Path('app/src/main/java/com/fantest/pokervision/VisionPipeline.java').exists(),
+    'suit-first picker class': Path('app/src/main/java/com/fantest/pokervision/CardPickerModel.java').exists(),
+    'new v0.3.0 activity': activity_path.exists(),
+    'suit-first copy present': 'Choose suit' in activity,
+    'old rank-first copy absent': 'Choose rank, then suit.' not in activity,
+    'review before scan commit': 'Confirm all' in activity or 'Confirm All' in activity,
     'math permits nine opponents': 'opponents > 9' in math,
-    'v0.2.8 patch is not executed during build': 'python3 tools/apply_v028_card_tap_picker.py' not in workflow,
-    'v0.2.9 patch is not executed during build': 'python3 tools/apply_v029_card_availability.py' not in workflow,
+    'legacy build-time picker patch absent': 'apply_v028_card_tap_picker.py' not in workflow,
+    'legacy build-time availability patch absent': 'apply_v029_card_availability.py' not in workflow,
 }
 
 failed = [name for name, ok in checks.items() if not ok]
 if failed:
-    raise SystemExit('Final-source verification failed:\n- ' + '\n- '.join(failed))
+    raise SystemExit('v0.3.0 source verification failed:\n- ' + '\n- '.join(failed))
 
-print('Final source is self-contained: interaction, card availability, and 10-player support are baked in.')
+print('Poker Vision v0.3.0 source contract is self-contained and ready for packaging.')

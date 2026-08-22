@@ -2,6 +2,7 @@ package com.fantest.pokervision;
 
 import org.junit.Test;
 import java.util.Arrays;
+import java.util.List;
 import static org.junit.Assert.*;
 
 public class PokerTableStateTest {
@@ -55,5 +56,35 @@ public class PokerTableStateTest {
         s.selectBoard(4); s.setSelected(q);
         assertEquals(Arrays.asList(a, k), s.holeCards());
         assertEquals(Arrays.asList(q), s.boardCards());
+    }
+
+    @Test public void invalidBatchDoesNotPartiallyMutateTable() {
+        PokerTableState t = new PokerTableState();
+        t.selectHole(0);
+        assertTrue(t.setSelected(new PokerMath.Card(14, 0)));
+        int areaBefore = t.selectedArea();
+        int indexBefore = t.selectedIndex();
+        List<PokerTableState.SlotUpdate> updates = Arrays.asList(
+                new PokerTableState.SlotUpdate(PokerTableState.AREA_BOARD, 0, new PokerMath.Card(13, 1)),
+                new PokerTableState.SlotUpdate(PokerTableState.AREA_BOARD, 1, new PokerMath.Card(14, 0))
+        );
+        assertFalse(t.applyBatch(updates));
+        assertNull(t.boardAt(0));
+        assertNull(t.boardAt(1));
+        assertEquals(areaBefore, t.selectedArea());
+        assertEquals(indexBefore, t.selectedIndex());
+    }
+
+    @Test public void validBatchCommitsEverySlotTogether() {
+        PokerTableState t = new PokerTableState();
+        List<PokerTableState.SlotUpdate> updates = Arrays.asList(
+                new PokerTableState.SlotUpdate(PokerTableState.AREA_HOLE, 0, new PokerMath.Card(14, 0)),
+                new PokerTableState.SlotUpdate(PokerTableState.AREA_HOLE, 1, new PokerMath.Card(13, 0)),
+                new PokerTableState.SlotUpdate(PokerTableState.AREA_BOARD, 0, new PokerMath.Card(12, 1))
+        );
+        assertTrue(t.applyBatch(updates));
+        assertEquals(new PokerMath.Card(14, 0), t.holeAt(0));
+        assertEquals(new PokerMath.Card(13, 0), t.holeAt(1));
+        assertEquals(new PokerMath.Card(12, 1), t.boardAt(0));
     }
 }
