@@ -11,7 +11,7 @@ final class RankRecognizer {
 
     SymbolPrediction<Integer> recognize(Mat indexCrop) {
         if (indexCrop == null || indexCrop.empty()) return null;
-        int h = Math.min(105, indexCrop.rows());
+        int h = Math.min(80, indexCrop.rows());
         int w = Math.min(VisionConstants.INDEX_WIDTH, indexCrop.cols());
         if (h < 20 || w < 20) return null;
         Mat region = new Mat(indexCrop, new Rect(0, 0, w, h));
