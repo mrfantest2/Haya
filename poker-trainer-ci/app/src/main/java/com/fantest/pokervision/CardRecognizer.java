@@ -6,6 +6,13 @@ import java.util.regex.*;
 
 public final class CardRecognizer {
     private CardRecognizer() {}
+
+    static final class Hints {
+        final Integer rank;
+        final Integer suit;
+        Hints(Integer rank, Integer suit) { this.rank = rank; this.suit = suit; }
+    }
+
     public static List<PokerMath.Card> extract(Text result) {
         LinkedHashSet<PokerMath.Card> found = new LinkedHashSet<>();
         if (result == null) return new ArrayList<>();
@@ -16,6 +23,13 @@ public final class CardRecognizer {
         parse(result.getText(), found);
         return new ArrayList<>(found);
     }
+
+    static Hints extractHints(Text result) {
+        List<PokerMath.Card> cards = extract(result);
+        if (cards.size() == 1) return new Hints(cards.get(0).rank, cards.get(0).suit);
+        return new Hints(null, null);
+    }
+
     private static void parse(String raw, Set<PokerMath.Card> out) {
         if (raw == null) return;
         String s = raw.toUpperCase(Locale.US)
@@ -31,6 +45,7 @@ public final class CardRecognizer {
         m=rev.matcher(s);
         while(m.find()) add(m.group(2), m.group(1).charAt(0), out);
     }
+
     private static void add(String rank, char suit, Set<PokerMath.Card> out) {
         int r=PokerMath.rankFromText(rank), s=PokerMath.suitFromChar(suit);
         if(r>=2&&s>=0) out.add(new PokerMath.Card(r,s));
