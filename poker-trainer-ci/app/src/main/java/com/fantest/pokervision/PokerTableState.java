@@ -1,7 +1,9 @@
 package com.fantest.pokervision;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Pure-Java state model for the seven visible Texas Hold'em card slots.
@@ -10,6 +12,18 @@ import java.util.List;
 public final class PokerTableState {
     public static final int AREA_HOLE = 0;
     public static final int AREA_BOARD = 1;
+
+    public static final class SlotUpdate {
+        public final int area;
+        public final int index;
+        public final PokerMath.Card card;
+
+        public SlotUpdate(int area, int index, PokerMath.Card card) {
+            this.area = area;
+            this.index = index;
+            this.card = card;
+        }
+    }
 
     private final PokerMath.Card[] hole = new PokerMath.Card[2];
     private final PokerMath.Card[] board = new PokerMath.Card[5];
@@ -43,6 +57,43 @@ public final class PokerTableState {
         if (existsElsewhere(card, selectedArea, selectedIndex)) return false;
         if (selectedArea == AREA_HOLE) hole[selectedIndex] = card;
         else board[selectedIndex] = card;
+        return true;
+    }
+
+    /**
+     * Applies a group of slot replacements atomically. Invalid bounds, duplicate targets,
+     * null cards or duplicate cards reject the whole batch without mutating the table.
+     */
+    public boolean applyBatch(List<SlotUpdate> updates) {
+        if (updates == null || updates.isEmpty()) return false;
+        PokerMath.Card[] nextHole = hole.clone();
+        PokerMath.Card[] nextBoard = board.clone();
+        Set<Integer> touched = new HashSet<>();
+
+        for (SlotUpdate update : updates) {
+            if (update == null || update.card == null) return false;
+            int ordinal;
+            if (update.area == AREA_HOLE) {
+                if (update.index < 0 || update.index >= nextHole.length) return false;
+                ordinal = update.index;
+                if (!touched.add(ordinal)) return false;
+                nextHole[update.index] = update.card;
+            } else if (update.area == AREA_BOARD) {
+                if (update.index < 0 || update.index >= nextBoard.length) return false;
+                ordinal = 2 + update.index;
+                if (!touched.add(ordinal)) return false;
+                nextBoard[update.index] = update.card;
+            } else {
+                return false;
+            }
+        }
+
+        HashSet<PokerMath.Card> unique = new HashSet<>();
+        for (PokerMath.Card card : nextHole) if (card != null && !unique.add(card)) return false;
+        for (PokerMath.Card card : nextBoard) if (card != null && !unique.add(card)) return false;
+
+        System.arraycopy(nextHole, 0, hole, 0, hole.length);
+        System.arraycopy(nextBoard, 0, board, 0, board.length);
         return true;
     }
 
