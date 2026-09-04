@@ -1,0 +1,89 @@
+name: Remote SMS Android Toolchain Bundle
+on:
+  push:
+    branches: ["remote-sms-toolchain"]
+permissions:
+  contents: read
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 35
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+      - name: Create dependency-equivalent dummy Android project
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dummy/app/src/main/java/win/fantest/dummy dummy/app/src/main
+          cat > dummy/settings.gradle.kts <<'EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+          rootProject.name = "RemoteSmsToolchainWarmup"
+          include(":app")
+          EOF
+          cat > dummy/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application") version "8.7.3" apply false
+              id("org.jetbrains.kotlin.android") version "2.0.21" apply false
+          }
+          EOF
+          cat > dummy/app/build.gradle.kts <<'EOF'
+          plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
+          android {
+              namespace = "win.fantest.dummy"
+              compileSdk = 35
+              defaultConfig { applicationId = "win.fantest.dummy"; minSdk = 26; targetSdk = 35; versionCode = 1; versionName = "1.0" }
+              compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+              kotlinOptions { jvmTarget = "17" }
+          }
+          dependencies { testImplementation("junit:junit:4.13.2") }
+          EOF
+          cat > dummy/app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"><application android:theme="@android:style/Theme.Material.Light.NoActionBar"><activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity></application></manifest>
+          EOF
+          cat > dummy/app/src/main/java/win/fantest/dummy/MainActivity.kt <<'EOF'
+          package win.fantest.dummy
+          import android.app.Activity
+          import android.os.Bundle
+          class MainActivity : Activity() { override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState) } }
+          EOF
+      - name: Warm exact Gradle and Maven dependencies
+        run: gradle -p dummy --no-daemon clean testDebugUnitTest assembleDebug
+      - name: Assemble offline toolchain bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p bundle/android-sdk bundle/gradle-user-home bundle/gradle
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME}}"
+          cp -a "$SDK/platforms" bundle/android-sdk/
+          cp -a "$SDK/build-tools" bundle/android-sdk/
+          cp -a "$SDK/platform-tools" bundle/android-sdk/
+          if [ -d "$SDK/licenses" ]; then cp -a "$SDK/licenses" bundle/android-sdk/; fi
+          GRADLE_BIN="$(readlink -f "$(command -v gradle)")"
+          GRADLE_HOME="$(cd "$(dirname "$GRADLE_BIN")/.." && pwd -P)"
+          cp -a "$GRADLE_HOME/." bundle/gradle/
+          cp -a "$HOME/.gradle/caches" bundle/gradle-user-home/
+          if [ -d "$HOME/.gradle/native" ]; then cp -a "$HOME/.gradle/native" bundle/gradle-user-home/; fi
+          printf 'Gradle=%s\nSDK=%s\n' "$(gradle --version | grep '^Gradle ' | head -1)" "$SDK" > bundle/TOOLCHAIN.txt
+          du -sh bundle bundle/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: remote-sms-android-toolchain
+          path: bundle
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 6
