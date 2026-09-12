@@ -1,0 +1,10 @@
+Continue LocalWhisper autonomously from GitHub branch `handoff/localwhisper-v0.2.1-opencode` in repository `mrfantest2/Haya`.
+
+Project root: `localwhisper-src/LocalWhisper/`
+Read `localwhisper-src/LocalWhisper/OPENCODE_HANDOFF_V0.2.1.md` completely before changing code.
+
+Mission: ship signed v0.2.1/versionCode 5. Fix the stuck 0 B model download by replacing Android DownloadManager with an app-owned resumable HTTPS downloader + foreground service; fix floating overlay pre-inference state so it no longer sits at 0%/Listening while the model is loading/decoding; update launcher icon to a distinct WhatsApp-green/white Local Whisper microphone/waveform adaptive icon; preserve all v0.2.0 accuracy, persistent model, WhatsApp share, overlay and offline behavior.
+
+Use TDD for downloader behavior. Run existing tests first. Use the proven GitHub public-runner Android build pipeline. Do not publish any private signing key. Final APK must be signed with the existing certificate fingerprint documented in the handoff. If the key is unavailable, stop after producing the verified aligned unsigned APK and report exactly what remains.
+
+Do not stop at planning. Execute full-flight until a real user-side blocker exists. Deliver APK, source ZIP, commit SHA, SHA-256, changed-files list, verification results, and direct Google Drive URL.
