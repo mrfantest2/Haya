@@ -1,11 +1,11 @@
-name: Temporary LocalWhisper APK Build
+name: Temporary LocalWhisper v0.2.0 APK Build
 
 on:
   push:
     branches:
-      - tmp/localwhisper-v0.1.2
+      - tmp/localwhisper-v0.2.0
     paths:
-      - localwhisper-build.trigger
+      - localwhisper-v0.2.0-build.trigger
   workflow_dispatch:
 
 permissions:
@@ -19,21 +19,39 @@ jobs:
       - name: Checkout temporary build branch
         uses: actions/checkout@v4
 
-      - name: Verify staged source
+      - name: Reconstruct and apply verified v0.2.0 patch
         shell: bash
         run: |
           set -euo pipefail
+          cat localwhisper-v0.2.0.patch.part01.b64 \
+              localwhisper-v0.2.0.patch.part02.b64 \
+              localwhisper-v0.2.0.patch.part03.b64 > /tmp/localwhisper-v0.2.0.patch.gz.b64
+          base64 --decode /tmp/localwhisper-v0.2.0.patch.gz.b64 > /tmp/localwhisper-v0.2.0.patch.gz
+          echo 'e2db76622bb4b6a2b613442e41a5d3ff66eb04938671df5da8b5b10668d49aa6  /tmp/localwhisper-v0.2.0.patch.gz' | sha256sum -c -
+          gzip -dc /tmp/localwhisper-v0.2.0.patch.gz > /tmp/localwhisper-v0.2.0.patch
+          echo '47bc1f261ba71f6340731d16dc0b9b015dae39ef48bfbbd20c1a9ed6a1790166  /tmp/localwhisper-v0.2.0.patch' | sha256sum -c -
+          git apply --check --directory=localwhisper-src/LocalWhisper /tmp/localwhisper-v0.2.0.patch
+          git apply --directory=localwhisper-src/LocalWhisper /tmp/localwhisper-v0.2.0.patch
           PROJECT="$GITHUB_WORKSPACE/localwhisper-src/LocalWhisper"
+          echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
+
+      - name: Verify staged v0.2.0 source
+        shell: bash
+        run: |
+          set -euo pipefail
           test -f "$PROJECT/settings.gradle.kts"
           test -f "$PROJECT/app/build.gradle.kts"
           test -f "$PROJECT/app/src/main/cpp/native-lib.cpp"
-          test -f "$PROJECT/app/src/main/java/win/fantest/localwhisper/MainActivity.java"
-          grep -Fq 'versionName = "0.1.2"' "$PROJECT/app/build.gradle.kts"
-          grep -Fq 'WHISPER_SAMPLING_BEAM_SEARCH' "$PROJECT/app/src/main/cpp/native-lib.cpp"
-          grep -Fq 'Resampler.quality' "$PROJECT/app/src/main/java/win/fantest/localwhisper/AudioDecoder.java"
-          grep -Fq 'MediaStore.Downloads.EXTERNAL_CONTENT_URI' "$PROJECT/app/src/main/java/win/fantest/localwhisper/ModelManager.java"
-          grep -Fq 'Use existing model file (no download)' "$PROJECT/app/src/main/java/win/fantest/localwhisper/MainActivity.java"
-          echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
+          test -f "$PROJECT/app/src/main/java/win/fantest/localwhisper/MainUi.java"
+          test -f "$PROJECT/app/src/main/java/win/fantest/localwhisper/OverlayService.java"
+          test -f "$PROJECT/app/src/main/java/win/fantest/localwhisper/ShareReceiverActivity.java"
+          grep -Fq 'versionCode = 4' "$PROJECT/app/build.gradle.kts"
+          grep -Fq 'versionName = "0.2.0"' "$PROJECT/app/build.gradle.kts"
+          grep -Fq 'TYPE_APPLICATION_OVERLAY' "$PROJECT/app/src/main/java/win/fantest/localwhisper/OverlayService.java"
+          grep -Fq 'setOnApplyWindowInsetsListener' "$PROJECT/app/src/main/java/win/fantest/localwhisper/MainUi.java"
+          grep -Fq 'ProgressListener listener' "$PROJECT/app/src/main/java/win/fantest/localwhisper/WhisperNative.java"
+          grep -Fq 'android.permission.SYSTEM_ALERT_WINDOW' "$PROJECT/app/src/main/AndroidManifest.xml"
+          grep -Fq 'DownloadProgressEstimator' "$PROJECT/app/src/main/java/win/fantest/localwhisper/MainActivity.java"
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -72,6 +90,25 @@ jobs:
         with:
           gradle-version: '8.7'
 
+      - name: Run pure Java regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT"
+          mkdir -p /tmp/lw-tests
+          javac -d /tmp/lw-tests \
+            app/src/main/java/win/fantest/localwhisper/Resampler.java \
+            app/src/main/java/win/fantest/localwhisper/DownloadProgressEstimator.java \
+            app/src/main/java/win/fantest/localwhisper/ProgressMapper.java \
+            tools/ResamplerSmokeTest.java \
+            tools/DownloadProgressEstimatorTest.java \
+            tools/ProgressMapperTest.java
+          java -cp /tmp/lw-tests ResamplerSmokeTest
+          java -cp /tmp/lw-tests DownloadProgressEstimatorTest
+          java -cp /tmp/lw-tests ProgressMapperTest
+          python3 tools/source_contract_test.py
+          python3 tools/main_ui_contract_test.py
+
       - name: Build unsigned arm64 release APK
         shell: bash
         run: |
@@ -86,17 +123,18 @@ jobs:
           SRC="$PROJECT/app/build/outputs/apk/release/app-release-unsigned.apk"
           test -s "$SRC"
           mkdir -p artifacts
-          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -f -p 4 "$SRC" artifacts/LocalWhisper-v0.1.2-unsigned-aligned.apk
-          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -v 4 artifacts/LocalWhisper-v0.1.2-unsigned-aligned.apk >/dev/null
-          unzip -t artifacts/LocalWhisper-v0.1.2-unsigned-aligned.apk >/dev/null
-          unzip -l artifacts/LocalWhisper-v0.1.2-unsigned-aligned.apk | grep -Fq 'lib/arm64-v8a/liblocalwhisper.so'
+          OUT="artifacts/LocalWhisper-v0.2.0-unsigned-aligned.apk"
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -f -p 4 "$SRC" "$OUT"
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -v 4 "$OUT" >/dev/null
+          unzip -t "$OUT" >/dev/null
+          unzip -l "$OUT" | grep -Fq 'lib/arm64-v8a/liblocalwhisper.so'
           cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" artifacts/apksigner.jar
-          sha256sum artifacts/LocalWhisper-v0.1.2-unsigned-aligned.apk | tee artifacts/UNSIGNED_SHA256SUMS.txt
+          sha256sum "$OUT" | tee artifacts/UNSIGNED_SHA256SUMS.txt
 
       - name: Upload unsigned APK and signing tool
         uses: actions/upload-artifact@v4
         with:
-          name: LocalWhisper-v0.1.2-unsigned
+          name: LocalWhisper-v0.2.0-unsigned
           path: artifacts/
           if-no-files-found: error
           retention-days: 2
