@@ -19,20 +19,19 @@ jobs:
       - name: Checkout temporary build branch
         uses: actions/checkout@v4
 
-      - name: Reconstruct and apply verified v0.2.0 patch
+      - name: Reconstruct verified v0.2.0 source
         shell: bash
         run: |
           set -euo pipefail
-          cat localwhisper-v0.2.0.patch.part01.b64 \
-              localwhisper-v0.2.0.patch.part02.b64 \
-              localwhisper-v0.2.0.patch.part03.b64 > /tmp/localwhisper-v0.2.0.patch.gz.b64
-          base64 --decode /tmp/localwhisper-v0.2.0.patch.gz.b64 > /tmp/localwhisper-v0.2.0.patch.gz
-          echo 'e2db76622bb4b6a2b613442e41a5d3ff66eb04938671df5da8b5b10668d49aa6  /tmp/localwhisper-v0.2.0.patch.gz' | sha256sum -c -
-          gzip -dc /tmp/localwhisper-v0.2.0.patch.gz > /tmp/localwhisper-v0.2.0.patch
-          echo '47bc1f261ba71f6340731d16dc0b9b015dae39ef48bfbbd20c1a9ed6a1790166  /tmp/localwhisper-v0.2.0.patch' | sha256sum -c -
-          git apply --check --directory=localwhisper-src/LocalWhisper /tmp/localwhisper-v0.2.0.patch
-          git apply --directory=localwhisper-src/LocalWhisper /tmp/localwhisper-v0.2.0.patch
-          PROJECT="$GITHUB_WORKSPACE/localwhisper-src/LocalWhisper"
+          cat localwhisper-v0.2.0.ci.part01.b64 \
+              localwhisper-v0.2.0.ci.part02.b64 \
+              localwhisper-v0.2.0.ci.part03.b64 \
+              localwhisper-v0.2.0.ci.part04.b64 > /tmp/localwhisper-v0.2.0-ci.tar.xz.b64
+          base64 --decode /tmp/localwhisper-v0.2.0-ci.tar.xz.b64 > /tmp/localwhisper-v0.2.0-ci.tar.xz
+          echo '93e33ec5a9f6b0306467a1670ccd008dcf4d47c7b5cff53ed53a4848924ff2e1  /tmp/localwhisper-v0.2.0-ci.tar.xz' | sha256sum -c -
+          PROJECT="$RUNNER_TEMP/LocalWhisper"
+          mkdir -p "$PROJECT"
+          tar -xJf /tmp/localwhisper-v0.2.0-ci.tar.xz -C "$PROJECT"
           echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
 
       - name: Verify staged v0.2.0 source
