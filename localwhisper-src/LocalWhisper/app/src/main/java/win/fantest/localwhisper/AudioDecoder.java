@@ -98,7 +98,7 @@ public final class AudioDecoder {
             }
 
             float[] mono = pcm.toArray();
-            float[] resampled = sampleRate == TARGET_RATE ? mono : Resampler.linear(mono, sampleRate, TARGET_RATE);
+            float[] resampled = sampleRate == TARGET_RATE ? mono : Resampler.quality(mono, sampleRate, TARGET_RATE);
             long durationMs = resampled.length * 1000L / TARGET_RATE;
             if (durationMs <= 0 && maxPtsUs > 0) durationMs = maxPtsUs / 1000L;
             return new DecodedAudio(resampled, durationMs);
