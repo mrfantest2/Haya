@@ -1,1 +1,1 @@
-LocalWhisper v0.1.1 accuracy build trigger
+LocalWhisper v0.1.2 persistent model + stable signing build trigger
