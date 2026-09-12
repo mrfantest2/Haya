@@ -2,6 +2,7 @@ package win.fantest.localwhisper;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.DownloadManager;
 import android.content.BroadcastReceiver;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -29,8 +30,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class MainActivity extends Activity {
+    private static final int REQUEST_NOTIFICATIONS = 9001;
+    private static final int REQUEST_MODEL_FILE = 9002;
+
     private TranscriptDb db;
     private AppPrefs prefs;
     private ModelManager models;
@@ -40,12 +45,21 @@ public final class MainActivity extends Activity {
     private CheckBox timestamps;
     private CheckBox keepAudio;
     private TextView status;
+    private TextView modelDetail;
     private LinearLayout history;
     private boolean shareHandled;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
+    private final AtomicBoolean maintenanceRunning = new AtomicBoolean(false);
 
     private final BroadcastReceiver changed = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) { refresh(); }
+    };
+
+    private final BroadcastReceiver downloadChanged = new BroadcastReceiver() {
+        @Override public void onReceive(Context context, Intent intent) {
+            long id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L);
+            if (prefs != null && id == prefs.downloadId()) maintainModelAsync(true);
+        }
     };
 
     @Override protected void onCreate(Bundle state) {
@@ -58,6 +72,7 @@ public final class MainActivity extends Activity {
         requestNotifications();
         handleShare(getIntent());
         refresh();
+        maintainModelAsync(false);
     }
 
     @Override protected void onNewIntent(Intent intent) {
@@ -69,24 +84,61 @@ public final class MainActivity extends Activity {
 
     @Override protected void onStart() {
         super.onStart();
-        IntentFilter filter = new IntentFilter(TranscriptionService.ACTION_CHANGED);
-        if (Build.VERSION.SDK_INT >= 33) registerReceiver(changed, filter, Context.RECEIVER_NOT_EXPORTED);
-        else registerReceiver(changed, filter);
+        IntentFilter changedFilter = new IntentFilter(TranscriptionService.ACTION_CHANGED);
+        IntentFilter downloadFilter = new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(changed, changedFilter, Context.RECEIVER_NOT_EXPORTED);
+            registerReceiver(downloadChanged, downloadFilter, Context.RECEIVER_EXPORTED);
+        } else {
+            registerReceiver(changed, changedFilter);
+            registerReceiver(downloadChanged, downloadFilter);
+        }
     }
 
     @Override protected void onResume() {
         super.onResume();
-        if (db != null) refresh();
+        if (db != null) {
+            refresh();
+            maintainModelAsync(false);
+        }
     }
 
     @Override protected void onStop() {
         try { unregisterReceiver(changed); } catch (Exception ignored) {}
+        try { unregisterReceiver(downloadChanged); } catch (Exception ignored) {}
         super.onStop();
     }
 
     @Override protected void onDestroy() {
         io.shutdownNow();
         super.onDestroy();
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_MODEL_FILE || resultCode != RESULT_OK || data == null) return;
+        Uri uri = data.getData();
+        if (uri == null) return;
+        savePrefs();
+        String modelId = prefs.model();
+        modelDetail.setText("Importing and verifying existing model…");
+        io.submit(() -> {
+            boolean ok = false;
+            String error = "";
+            try {
+                ok = models.importExistingModel(modelId, uri);
+                if (!ok) error = "The selected file does not match the selected Whisper model";
+            } catch (Exception e) {
+                error = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            }
+            boolean imported = ok;
+            String finalError = error;
+            runOnUiThread(() -> {
+                refresh();
+                toast(imported ? "Existing model imported — no download needed" : "Import failed: " + finalError);
+                if (imported) startProcessing();
+            });
+        });
     }
 
     private View buildUi() {
@@ -110,6 +162,39 @@ public final class MainActivity extends Activity {
         keepAudio = new CheckBox(this); keepAudio.setText("Keep imported audio");
 
         root.addView(label("Model")); root.addView(modelSpinner);
+        modelDetail = text("", 13, false);
+        modelDetail.setTextColor(Color.DKGRAY);
+        root.addView(modelDetail);
+
+        Button download = button("Download / restore selected model");
+        download.setOnClickListener(v -> {
+            savePrefs();
+            String modelId = prefs.model();
+            if (models.isInstalled(modelId)) { toast("Model already installed"); return; }
+            if (models.hasPersistentBackup(modelId)) {
+                modelDetail.setText("Restoring persistent model backup…");
+                maintainModelAsync(true);
+                return;
+            }
+            try {
+                long id = models.enqueue(modelId);
+                prefs.setDownload(id, modelId);
+                modelDetail.setText("Model download started. It will be backed up persistently after verification.");
+                toast("Model download started");
+            } catch (Exception e) { toast("Download failed: " + e.getMessage()); }
+        });
+        root.addView(download);
+
+        Button existing = button("Use existing model file (no download)");
+        existing.setOnClickListener(v -> {
+            savePrefs();
+            Intent open = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            open.addCategory(Intent.CATEGORY_OPENABLE);
+            open.setType("*/*");
+            startActivityForResult(open, REQUEST_MODEL_FILE);
+        });
+        root.addView(existing);
+
         root.addView(label("Language")); root.addView(languageSpinner);
         root.addView(label("Output")); root.addView(outputSpinner);
         root.addView(timestamps); root.addView(keepAudio);
@@ -117,18 +202,6 @@ public final class MainActivity extends Activity {
         Button save = button("Save settings");
         save.setOnClickListener(v -> { savePrefs(); refresh(); toast("Settings saved"); });
         root.addView(save);
-
-        Button download = button("Download selected model");
-        download.setOnClickListener(v -> {
-            savePrefs();
-            if (models.isInstalled(prefs.model())) { toast("Model already installed"); return; }
-            try {
-                long id = models.enqueue(prefs.model());
-                prefs.setDownload(id, prefs.model());
-                toast("Model download started");
-            } catch (Exception e) { toast("Download failed: " + e.getMessage()); }
-        });
-        root.addView(download);
 
         Button process = button("Process pending audio");
         process.setOnClickListener(v -> startProcessing());
@@ -192,16 +265,94 @@ public final class MainActivity extends Activity {
 
     private void startProcessing() {
         savePrefs();
-        if (!models.isInstalled(prefs.model())) { toast("Download the selected model first"); return; }
+        if (!models.isInstalled(prefs.model())) {
+            if (models.hasPersistentBackup(prefs.model())) {
+                toast("Restoring the saved model first");
+                maintainModelAsync(true);
+            } else {
+                toast("Download or import the selected offline model first");
+            }
+            return;
+        }
         if (db.pendingCount() == 0) { toast("No pending audio"); return; }
         Intent i = new Intent(this, TranscriptionService.class).setAction(TranscriptionService.ACTION_PROCESS);
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(i); else startService(i);
     }
 
+    private void maintainModelAsync(boolean userRequested) {
+        if (!maintenanceRunning.compareAndSet(false, true)) return;
+        savePrefs();
+        String selected = prefs.model();
+        io.submit(() -> {
+            boolean restored = false;
+            boolean backedUp = false;
+            String message = "";
+            try {
+                long downloadId = prefs.downloadId();
+                if (downloadId >= 0) {
+                    ModelManager.DownloadState state = models.query(downloadId);
+                    if (state.status == DownloadManager.STATUS_RUNNING || state.status == DownloadManager.STATUS_PENDING) {
+                        message = state.total > 0 ? "Downloading model · " + (state.downloaded * 100 / state.total) + "%" : "Downloading model…";
+                    } else if (state.status == DownloadManager.STATUS_SUCCESSFUL) {
+                        String downloadedModel = prefs.downloadModel();
+                        if (downloadedModel == null || downloadedModel.isEmpty()) downloadedModel = selected;
+                        if (!models.verifyAndMark(downloadedModel)) {
+                            models.remove(downloadedModel);
+                            message = "Downloaded model failed checksum verification";
+                        } else {
+                            models.backupInstalledModel(downloadedModel);
+                            backedUp = true;
+                            message = "Model verified and persistent backup saved";
+                        }
+                        prefs.clearDownload();
+                    } else if (state.status == DownloadManager.STATUS_FAILED) {
+                        message = "Model download failed · code " + state.reason;
+                        prefs.clearDownload();
+                    }
+                }
+                if (!models.isInstalled(selected) && models.hasPersistentBackup(selected)) {
+                    restored = models.restorePersistentBackup(selected);
+                    if (restored) message = "Model restored locally from persistent backup";
+                }
+                if (!models.isInstalled(selected) && models.hasRawLocalModel(selected)) {
+                    if (models.verifyAndMark(selected)) {
+                        models.backupInstalledModel(selected);
+                        backedUp = true;
+                        message = "Existing model verified and persistent backup saved";
+                    }
+                } else if (models.isInstalled(selected) && !models.hasPersistentBackup(selected)) {
+                    models.backupInstalledModel(selected);
+                    backedUp = true;
+                    message = "Persistent model backup saved";
+                }
+            } catch (Exception e) {
+                message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            }
+            boolean didRestore = restored;
+            boolean didBackup = backedUp;
+            String finalMessage = message;
+            maintenanceRunning.set(false);
+            runOnUiThread(() -> {
+                refresh();
+                if (!finalMessage.isEmpty()) modelDetail.setText(finalMessage);
+                if (userRequested && didRestore) toast("Model restored — no download needed");
+                else if (userRequested && didBackup) toast("Persistent model backup ready");
+            });
+        });
+    }
+
     private void refresh() {
         if (status == null) return;
-        String model = models.isInstalled(prefs.model()) ? "model ready" : "model not installed";
-        status.setText(model + " · queue: " + db.pendingCount());
+        String selected = prefs.model();
+        boolean installed = models.isInstalled(selected);
+        boolean backup = models.hasPersistentBackup(selected);
+        status.setText((installed ? "model ready" : "model not installed") + " · queue: " + db.pendingCount());
+        if (modelDetail != null && !maintenanceRunning.get()) {
+            if (installed && backup) modelDetail.setText("Installed · persistent backup ready for future reinstall");
+            else if (installed) modelDetail.setText("Installed · creating persistent backup…");
+            else if (backup) modelDetail.setText("Persistent backup found · tap Download / restore");
+            else modelDetail.setText("Not installed");
+        }
         history.removeAllViews();
         List<TranscriptDb.Job> jobs = db.recent(30);
         if (jobs.isEmpty()) { history.addView(text("No transcripts yet.", 14, false)); return; }
@@ -245,7 +396,7 @@ public final class MainActivity extends Activity {
 
     private void requestNotifications() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 9001);
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQUEST_NOTIFICATIONS);
         }
     }
 
