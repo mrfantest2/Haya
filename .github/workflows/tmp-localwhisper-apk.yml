@@ -3,7 +3,7 @@ name: Temporary LocalWhisper APK Build
 on:
   push:
     branches:
-      - tmp/localwhisper-v0.1.1
+      - tmp/localwhisper-v0.1.2
     paths:
       - localwhisper-build.trigger
   workflow_dispatch:
@@ -28,9 +28,11 @@ jobs:
           test -f "$PROJECT/app/build.gradle.kts"
           test -f "$PROJECT/app/src/main/cpp/native-lib.cpp"
           test -f "$PROJECT/app/src/main/java/win/fantest/localwhisper/MainActivity.java"
-          grep -Fq 'versionName = "0.1.1"' "$PROJECT/app/build.gradle.kts"
+          grep -Fq 'versionName = "0.1.2"' "$PROJECT/app/build.gradle.kts"
           grep -Fq 'WHISPER_SAMPLING_BEAM_SEARCH' "$PROJECT/app/src/main/cpp/native-lib.cpp"
           grep -Fq 'Resampler.quality' "$PROJECT/app/src/main/java/win/fantest/localwhisper/AudioDecoder.java"
+          grep -Fq 'MediaStore.Downloads.EXTERNAL_CONTENT_URI' "$PROJECT/app/src/main/java/win/fantest/localwhisper/ModelManager.java"
+          grep -Fq 'Use existing model file (no download)' "$PROJECT/app/src/main/java/win/fantest/localwhisper/MainActivity.java"
           echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
 
       - name: Set up Java 17
@@ -70,30 +72,31 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Build arm64 debug APK
+      - name: Build unsigned arm64 release APK
         shell: bash
         run: |
           set -euo pipefail
           cd "$PROJECT"
-          gradle --no-daemon clean assembleDebug --stacktrace
+          gradle --no-daemon clean assembleRelease --stacktrace
 
-      - name: Verify APK
+      - name: Align and verify unsigned APK
         shell: bash
         run: |
           set -euo pipefail
-          APK="$PROJECT/app/build/outputs/apk/debug/app-debug.apk"
-          test -s "$APK"
-          unzip -t "$APK" >/dev/null
-          unzip -l "$APK" | grep -Fq 'lib/arm64-v8a/liblocalwhisper.so'
+          SRC="$PROJECT/app/build/outputs/apk/release/app-release-unsigned.apk"
+          test -s "$SRC"
           mkdir -p artifacts
-          cp "$APK" artifacts/LocalWhisper-v0.1.1-debug.apk
-          sha256sum artifacts/LocalWhisper-v0.1.1-debug.apk | tee artifacts/SHA256SUMS.txt
-          ls -lh artifacts/LocalWhisper-v0.1.1-debug.apk
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -f -p 4 "$SRC" artifacts/LocalWhisper-v0.1.2-unsigned-aligned.apk
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -v 4 artifacts/LocalWhisper-v0.1.2-unsigned-aligned.apk >/dev/null
+          unzip -t artifacts/LocalWhisper-v0.1.2-unsigned-aligned.apk >/dev/null
+          unzip -l artifacts/LocalWhisper-v0.1.2-unsigned-aligned.apk | grep -Fq 'lib/arm64-v8a/liblocalwhisper.so'
+          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" artifacts/apksigner.jar
+          sha256sum artifacts/LocalWhisper-v0.1.2-unsigned-aligned.apk | tee artifacts/UNSIGNED_SHA256SUMS.txt
 
-      - name: Upload APK artifact
+      - name: Upload unsigned APK and signing tool
         uses: actions/upload-artifact@v4
         with:
-          name: LocalWhisper-v0.1.1-debug
+          name: LocalWhisper-v0.1.2-unsigned
           path: artifacts/
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 2
