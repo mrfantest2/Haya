@@ -110,17 +110,44 @@ Java_win_fantest_localwhisper_WhisperNative_transcribe(
     std::string lang = jstringToUtf8(env, language);
     if (lang.empty()) lang = "auto";
 
-    whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+    whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_BEAM_SEARCH);
     params.print_realtime = false;
     params.print_progress = false;
     params.print_timestamps = false;
     params.print_special = false;
     params.translate = translate == JNI_TRUE;
     params.language = lang.c_str();
-    params.no_context = false;
+
+    // Every shared WhatsApp note is independent. Never let a previous voice note
+    // condition the next one and accidentally replace words based on old context.
+    params.no_context = true;
+    params.no_timestamps = includeTimestamps != JNI_TRUE;
     params.single_segment = false;
     params.suppress_blank = true;
+    params.suppress_nst = true;
     params.temperature = 0.0f;
+    params.temperature_inc = 0.2f;
+
+    // Wider search on the short notes this app is optimized for; slightly smaller
+    // search on long recordings to keep phone inference practical.
+    const float seconds = sampleCount / 16000.0f;
+    params.beam_search.beam_size = seconds <= 20.0f ? 8 : 5;
+    params.beam_search.patience = 1.0f;
+
+    // Keep quiet first/last words rather than discarding them as no-speech.
+    params.no_speech_thold = 0.35f;
+
+    // Literal mixed-language prompt. The examples guide code-switching recognition
+    // but do not replace text after decoding, so a genuine word is never hard-coded.
+    const std::string verbatimPrompt =
+            "تفريغ حرفي دقيق. اكتب كل الكلمات كما قيلت بدون تلخيص أو إعادة صياغة. "
+            "قد توجد كلمات إنجليزية داخل العربية؛ احتفظ بها بالإنجليزية كما نُطقت، "
+            "مثل pink و black و white وأسماء الأشخاص والمنتجات. "
+            "Verbatim transcription. Preserve code-switched English words exactly.";
+    if (translate != JNI_TRUE) {
+        params.initial_prompt = verbatimPrompt.c_str();
+        params.carry_initial_prompt = true;
+    }
 
     const unsigned int hc = std::max(1u, std::thread::hardware_concurrency());
     params.n_threads = static_cast<int>(std::clamp(hc > 2 ? hc - 2 : hc, 2u, 8u));
