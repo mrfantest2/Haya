@@ -3,7 +3,7 @@ name: Temporary LocalWhisper APK Build
 on:
   push:
     branches:
-      - tmp/localwhisper-apk-build
+      - tmp/localwhisper-v0.1.1
     paths:
       - localwhisper-build.trigger
   workflow_dispatch:
@@ -28,6 +28,9 @@ jobs:
           test -f "$PROJECT/app/build.gradle.kts"
           test -f "$PROJECT/app/src/main/cpp/native-lib.cpp"
           test -f "$PROJECT/app/src/main/java/win/fantest/localwhisper/MainActivity.java"
+          grep -Fq 'versionName = "0.1.1"' "$PROJECT/app/build.gradle.kts"
+          grep -Fq 'WHISPER_SAMPLING_BEAM_SEARCH' "$PROJECT/app/src/main/cpp/native-lib.cpp"
+          grep -Fq 'Resampler.quality' "$PROJECT/app/src/main/java/win/fantest/localwhisper/AudioDecoder.java"
           echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
 
       - name: Set up Java 17
@@ -81,15 +84,16 @@ jobs:
           APK="$PROJECT/app/build/outputs/apk/debug/app-debug.apk"
           test -s "$APK"
           unzip -t "$APK" >/dev/null
+          unzip -l "$APK" | grep -Fq 'lib/arm64-v8a/liblocalwhisper.so'
           mkdir -p artifacts
-          cp "$APK" artifacts/LocalWhisper-v0.1.0-debug.apk
-          sha256sum artifacts/LocalWhisper-v0.1.0-debug.apk | tee artifacts/SHA256SUMS.txt
-          ls -lh artifacts/LocalWhisper-v0.1.0-debug.apk
+          cp "$APK" artifacts/LocalWhisper-v0.1.1-debug.apk
+          sha256sum artifacts/LocalWhisper-v0.1.1-debug.apk | tee artifacts/SHA256SUMS.txt
+          ls -lh artifacts/LocalWhisper-v0.1.1-debug.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LocalWhisper-v0.1.0-debug
+          name: LocalWhisper-v0.1.1-debug
           path: artifacts/
           if-no-files-found: error
           retention-days: 7
