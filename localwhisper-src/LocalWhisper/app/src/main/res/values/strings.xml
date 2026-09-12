@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Local Whisper</string>
+    <string name="channel_name">Local transcription</string>
+    <string name="channel_description">Shows progress while audio is transcribed on this phone.</string>
+</resources>
