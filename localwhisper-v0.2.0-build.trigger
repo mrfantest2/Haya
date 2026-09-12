@@ -1,1 +1,1 @@
-LocalWhisper v0.2.0 deterministic full-source release build
+LocalWhisper v0.2.0 verified-chunk deterministic release build
