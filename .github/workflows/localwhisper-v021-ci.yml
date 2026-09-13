@@ -91,15 +91,15 @@ jobs:
           cd "$PROJECT"
           rm -rf /tmp/lwtests && mkdir -p /tmp/lwtests
           javac -d /tmp/lwtests app/src/main/java/win/fantest/localwhisper/DownloadProgressEstimator.java tools/DownloadProgressEstimatorTest.java
-          java -cp /tmp/lwtests win.fantest.localwhisper.DownloadProgressEstimatorTest
+          java -cp /tmp/lwtests DownloadProgressEstimatorTest
           javac -d /tmp/lwtests app/src/main/java/win/fantest/localwhisper/ModelFileInstaller.java tools/ModelFileInstallerTest.java
-          java -cp /tmp/lwtests win.fantest.localwhisper.ModelFileInstallerTest
+          java -cp /tmp/lwtests ModelFileInstallerTest
           javac -d /tmp/lwtests app/src/main/java/win/fantest/localwhisper/ProgressMapper.java tools/ProgressMapperTest.java
-          java -cp /tmp/lwtests win.fantest.localwhisper.ProgressMapperTest
+          java -cp /tmp/lwtests ProgressMapperTest
           javac -d /tmp/lwtests app/src/main/java/win/fantest/localwhisper/Resampler.java tools/ResamplerSmokeTest.java
-          java -cp /tmp/lwtests win.fantest.localwhisper.ResamplerSmokeTest
+          java -cp /tmp/lwtests ResamplerSmokeTest
           javac -d /tmp/lwtests app/src/main/java/win/fantest/localwhisper/ResumableHttpDownloader.java tools/ResumableHttpDownloaderTest.java
-          java -cp /tmp/lwtests win.fantest.localwhisper.ResumableHttpDownloaderTest
+          java -cp /tmp/lwtests ResumableHttpDownloaderTest
           python3 tools/source_contract_test.py
           python3 tools/main_ui_contract_test.py
           python3 tools/v021_contract_test.py
