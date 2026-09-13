@@ -1,11 +1,11 @@
-name: LocalWhisper v0.2.1 Verified APK Build
+name: LocalWhisper v0.2.2 Visual Polish Build
 
 on:
   push:
     branches:
-      - build/localwhisper-v0.2.1-ci
+      - build/localwhisper-v0.2.2-ci2
     paths:
-      - localwhisper-v021-build.trigger
+      - localwhisper-v022-build.trigger
   workflow_dispatch:
 
 permissions:
@@ -19,7 +19,7 @@ jobs:
       - name: Checkout build branch
         uses: actions/checkout@v4
 
-      - name: Reconstruct exact verified v0.2.1 source
+      - name: Reconstruct verified v0.2.1 baseline and apply v0.2.2 patch
         shell: bash
         run: |
           set -euo pipefail
@@ -27,13 +27,17 @@ jobs:
           test "$(wc -c < /tmp/source.tar.xz.b64)" -eq 58860
           base64 -d /tmp/source.tar.xz.b64 > /tmp/source.tar.xz
           echo '99b7246060d76b45d2fcbde2567344b204e2e5ead121a88f2cd13b836be824da  /tmp/source.tar.xz' | sha256sum -c -
-          rm -rf "$GITHUB_WORKSPACE/localwhisper-v021"
-          mkdir -p "$GITHUB_WORKSPACE/localwhisper-v021"
-          tar -xJf /tmp/source.tar.xz -C "$GITHUB_WORKSPACE/localwhisper-v021"
-          PROJECT="$GITHUB_WORKSPACE/localwhisper-v021"
+          rm -rf "$GITHUB_WORKSPACE/localwhisper-v022"
+          mkdir -p "$GITHUB_WORKSPACE/localwhisper-v022"
+          tar -xJf /tmp/source.tar.xz -C "$GITHUB_WORKSPACE/localwhisper-v022"
+          base64 -d ci/localwhisper-v022.patch.xz.b64 > /tmp/v022.patch.xz
+          xz -dc /tmp/v022.patch.xz > /tmp/v022.patch
+          cd "$GITHUB_WORKSPACE/localwhisper-v022"
+          patch -p1 < /tmp/v022.patch
+          PROJECT="$GITHUB_WORKSPACE/localwhisper-v022"
           echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
 
-      - name: Verify staged source contracts
+      - name: Verify v0.2.2 source contracts
         shell: bash
         run: |
           set -euo pipefail
@@ -41,10 +45,11 @@ jobs:
           test -f "$PROJECT/app/src/main/cpp/native-lib.cpp"
           test -f "$PROJECT/app/src/main/java/win/fantest/localwhisper/ResumableHttpDownloader.java"
           test -f "$PROJECT/app/src/main/java/win/fantest/localwhisper/ModelDownloadService.java"
-          grep -Fq 'versionCode = 5' "$PROJECT/app/build.gradle.kts"
-          grep -Fq 'versionName = "0.2.1"' "$PROJECT/app/build.gradle.kts"
-          grep -Fq 'Loading Whisper model' "$PROJECT/app/src/main/java/win/fantest/localwhisper/TranscriptionService.java"
-          grep -Fq 'setIndeterminate' "$PROJECT/app/src/main/java/win/fantest/localwhisper/OverlayService.java"
+          grep -Fq 'versionCode = 6' "$PROJECT/app/build.gradle.kts"
+          grep -Fq 'versionName = "0.2.2"' "$PROJECT/app/build.gradle.kts"
+          grep -Fq 'modelStateChip' "$PROJECT/app/src/main/java/win/fantest/localwhisper/MainUi.java"
+          grep -Fq 'recentSeeAll' "$PROJECT/app/src/main/java/win/fantest/localwhisper/MainUi.java"
+          grep -Fq 'Transcription continues in the background' "$PROJECT/app/src/main/java/win/fantest/localwhisper/OverlayService.java"
           grep -Fq '#25D366' "$PROJECT/app/src/main/res/values/colors.xml"
 
       - name: Set up Java 17
@@ -84,7 +89,7 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Run v0.2.1 regression suite
+      - name: Run v0.2.2 regression suite
         shell: bash
         run: |
           set -euo pipefail
@@ -103,6 +108,7 @@ jobs:
           python3 tools/source_contract_test.py
           python3 tools/main_ui_contract_test.py
           python3 tools/v021_contract_test.py
+          python3 tools/v022_visual_contract_test.py
 
       - name: Build unsigned arm64 release APK
         shell: bash
@@ -118,17 +124,17 @@ jobs:
           SRC="$PROJECT/app/build/outputs/apk/release/app-release-unsigned.apk"
           test -s "$SRC"
           mkdir -p artifacts
-          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -f -p 4 "$SRC" artifacts/LocalWhisper-v0.2.1-unsigned-aligned.apk
-          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -v 4 artifacts/LocalWhisper-v0.2.1-unsigned-aligned.apk >/dev/null
-          unzip -t artifacts/LocalWhisper-v0.2.1-unsigned-aligned.apk >/dev/null
-          unzip -l artifacts/LocalWhisper-v0.2.1-unsigned-aligned.apk | grep -Fq 'lib/arm64-v8a/liblocalwhisper.so'
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -f -p 4 "$SRC" artifacts/LocalWhisper-v0.2.2-unsigned-aligned.apk
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -v 4 artifacts/LocalWhisper-v0.2.2-unsigned-aligned.apk >/dev/null
+          unzip -t artifacts/LocalWhisper-v0.2.2-unsigned-aligned.apk >/dev/null
+          unzip -l artifacts/LocalWhisper-v0.2.2-unsigned-aligned.apk | grep -Fq 'lib/arm64-v8a/liblocalwhisper.so'
           cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" artifacts/apksigner.jar
-          sha256sum artifacts/LocalWhisper-v0.2.1-unsigned-aligned.apk | tee artifacts/UNSIGNED_SHA256SUMS.txt
+          sha256sum artifacts/LocalWhisper-v0.2.2-unsigned-aligned.apk | tee artifacts/UNSIGNED_SHA256SUMS.txt
 
       - name: Upload unsigned APK and signing tool
         uses: actions/upload-artifact@v4
         with:
-          name: LocalWhisper-v0.2.1-unsigned-current
+          name: LocalWhisper-v0.2.2-unsigned-current
           path: artifacts/
           if-no-files-found: error
           retention-days: 2
