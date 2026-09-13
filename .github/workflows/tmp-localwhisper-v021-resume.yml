@@ -24,12 +24,16 @@ jobs:
         run: |
           set -euo pipefail
           echo '6f0e802c321e88df998572b35abf83bd109696411e745a85a52809850545c69c  localwhisper-v0.2.1.patch.part00.b64' | sha256sum -c -
-          echo '8525602eb9a6b683cfe9f2c7de51c6a51219c42e495cf66b574b2c30bfc63ccc  localwhisper-v0.2.1.patch.part01.b64' | sha256sum -c -
-          echo '090022f3b9b8df6f2f420c3591e94124f7cc99c9301e80c7227b32690bad151c  localwhisper-v0.2.1.patch.part02.b64' | sha256sum -c -
+          echo '1692a839f36474702227969ea8702d0958085ab29867effa2c2305a2ddcff026  localwhisper-v0.2.1.patch.part01a.b64' | sha256sum -c -
+          echo '834f421329e8d36bb8b7593fd11ef54c89489be0e708e02957b403ba0a958e26  localwhisper-v0.2.1.patch.part01b.b64' | sha256sum -c -
+          echo 'b88aad6c487735ff3133e22e3722f1c58e7443d1d58c59c2fa18f4ca9542b170  localwhisper-v0.2.1.patch.part02a.b64' | sha256sum -c -
+          echo '3fbbf0dab62e9fa5c310fe26c7425e4b9b61a7ace90f778de96dd019c826e0f4  localwhisper-v0.2.1.patch.part02b.b64' | sha256sum -c -
           echo '5f56ce246229c59f49db357966c4ca682b60460b9d1b233c45fb97587f46624c  localwhisper-v0.2.1.patch.part03.b64' | sha256sum -c -
           cat localwhisper-v0.2.1.patch.part00.b64 \
-              localwhisper-v0.2.1.patch.part01.b64 \
-              localwhisper-v0.2.1.patch.part02.b64 \
+              localwhisper-v0.2.1.patch.part01a.b64 \
+              localwhisper-v0.2.1.patch.part01b.b64 \
+              localwhisper-v0.2.1.patch.part02a.b64 \
+              localwhisper-v0.2.1.patch.part02b.b64 \
               localwhisper-v0.2.1.patch.part03.b64 > /tmp/localwhisper-v0.2.1.patch.gz.b64
           echo '471ca808e2fbc3f1105a9deffdf4624a0188d56b4f4fbb1a8c0eec7b830ae465  /tmp/localwhisper-v0.2.1.patch.gz.b64' | sha256sum -c -
           base64 --decode /tmp/localwhisper-v0.2.1.patch.gz.b64 > /tmp/localwhisper-v0.2.1.patch.gz
