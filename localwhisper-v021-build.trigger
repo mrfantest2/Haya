@@ -1,1 +1,1 @@
-LocalWhisper v0.2.1 verified build trigger - retry 2
+LocalWhisper v0.2.1 exact-source build trigger - retry 3
