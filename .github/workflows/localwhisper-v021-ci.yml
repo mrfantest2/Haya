@@ -1,0 +1,134 @@
+name: LocalWhisper v0.2.1 Verified APK Build
+
+on:
+  push:
+    branches:
+      - build/localwhisper-v0.2.1-ci
+    paths:
+      - localwhisper-v021-build.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout build branch
+        uses: actions/checkout@v4
+
+      - name: Reconstruct and verify v0.2.1 patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat ci/localwhisper-v021/patch00.b64 ci/localwhisper-v021/patch01.b64 ci/localwhisper-v021/patch02.b64 > /tmp/lw.patch.gz.b64
+          test "$(wc -c < /tmp/lw.patch.gz.b64)" -eq 21160
+          base64 -d /tmp/lw.patch.gz.b64 > /tmp/lw.patch.gz
+          echo '8923131192cd86eb9881865c085f2e5abb6d44c9fd2d8cf76fe1c02c12fa1c89  /tmp/lw.patch.gz' | sha256sum -c -
+          gzip -dc /tmp/lw.patch.gz > /tmp/lw.patch
+          PROJECT="$GITHUB_WORKSPACE/localwhisper-src/LocalWhisper"
+          cd "$PROJECT"
+          patch -p1 < /tmp/lw.patch
+          echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
+
+      - name: Verify staged source contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$PROJECT/settings.gradle.kts"
+          test -f "$PROJECT/app/src/main/cpp/native-lib.cpp"
+          test -f "$PROJECT/app/src/main/java/win/fantest/localwhisper/ResumableHttpDownloader.java"
+          test -f "$PROJECT/app/src/main/java/win/fantest/localwhisper/ModelDownloadService.java"
+          grep -Fq 'versionCode = 5' "$PROJECT/app/build.gradle.kts"
+          grep -Fq 'versionName = "0.2.1"' "$PROJECT/app/build.gradle.kts"
+          grep -Fq 'Loading Whisper model' "$PROJECT/app/src/main/java/win/fantest/localwhisper/TranscriptionService.java"
+          grep -Fq 'setIndeterminate' "$PROJECT/app/src/main/java/win/fantest/localwhisper/OverlayService.java"
+          grep -Fq '#25D366' "$PROJECT/app/src/main/res/values/colors.xml"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android native toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0' 'cmake;3.22.1' 'ndk;27.2.12479018'
+
+      - name: Pin NDK for hosted build
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          p = Path(os.environ['PROJECT']) / 'app/build.gradle.kts'
+          s = p.read_text()
+          needle = '    compileSdk = 35\n'
+          assert needle in s
+          if 'ndkVersion = ' not in s:
+              s = s.replace(needle, needle + '    ndkVersion = "27.2.12479018"\n', 1)
+          p.write_text(s)
+          PY
+
+      - name: Set up Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Run v0.2.1 regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT"
+          rm -rf /tmp/lwtests && mkdir -p /tmp/lwtests
+          javac -d /tmp/lwtests app/src/main/java/win/fantest/localwhisper/DownloadProgressEstimator.java tools/DownloadProgressEstimatorTest.java
+          java -cp /tmp/lwtests win.fantest.localwhisper.DownloadProgressEstimatorTest
+          javac -d /tmp/lwtests app/src/main/java/win/fantest/localwhisper/ModelFileInstaller.java tools/ModelFileInstallerTest.java
+          java -cp /tmp/lwtests win.fantest.localwhisper.ModelFileInstallerTest
+          javac -d /tmp/lwtests app/src/main/java/win/fantest/localwhisper/ProgressMapper.java tools/ProgressMapperTest.java
+          java -cp /tmp/lwtests win.fantest.localwhisper.ProgressMapperTest
+          javac -d /tmp/lwtests app/src/main/java/win/fantest/localwhisper/Resampler.java tools/ResamplerSmokeTest.java
+          java -cp /tmp/lwtests win.fantest.localwhisper.ResamplerSmokeTest
+          javac -d /tmp/lwtests app/src/main/java/win/fantest/localwhisper/ResumableHttpDownloader.java tools/ResumableHttpDownloaderTest.java
+          java -cp /tmp/lwtests win.fantest.localwhisper.ResumableHttpDownloaderTest
+          python3 tools/source_contract_test.py
+          python3 tools/main_ui_contract_test.py
+          python3 tools/v021_contract_test.py
+
+      - name: Build unsigned arm64 release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT"
+          gradle --no-daemon clean assembleRelease --stacktrace
+
+      - name: Align and verify unsigned APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC="$PROJECT/app/build/outputs/apk/release/app-release-unsigned.apk"
+          test -s "$SRC"
+          mkdir -p artifacts
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -f -p 4 "$SRC" artifacts/LocalWhisper-v0.2.1-unsigned-aligned.apk
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -v 4 artifacts/LocalWhisper-v0.2.1-unsigned-aligned.apk >/dev/null
+          unzip -t artifacts/LocalWhisper-v0.2.1-unsigned-aligned.apk >/dev/null
+          unzip -l artifacts/LocalWhisper-v0.2.1-unsigned-aligned.apk | grep -Fq 'lib/arm64-v8a/liblocalwhisper.so'
+          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" artifacts/apksigner.jar
+          sha256sum artifacts/LocalWhisper-v0.2.1-unsigned-aligned.apk | tee artifacts/UNSIGNED_SHA256SUMS.txt
+
+      - name: Upload unsigned APK and signing tool
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocalWhisper-v0.2.1-unsigned-current
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 2
