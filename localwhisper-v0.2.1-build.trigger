@@ -1,0 +1,2 @@
+LocalWhisper v0.2.1 resumed build
+verified patch sha256 e0d66b685580fc5dfba94505723f193cc9fdca06d212586fd1878729dce41063
