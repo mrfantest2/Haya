@@ -34,6 +34,8 @@ jobs:
           xz -dc /tmp/v022.patch.xz > /tmp/v022.patch
           cd "$GITHUB_WORKSPACE/localwhisper-v022"
           patch -p1 < /tmp/v022.patch
+          sed -i 's/row\.setMinHeight(dp(52));/row.setMinimumHeight(dp(52));/' app/src/main/java/win/fantest/localwhisper/MainUi.java
+          grep -Fq 'row.setMinimumHeight(dp(52));' app/src/main/java/win/fantest/localwhisper/MainUi.java
           PROJECT="$GITHUB_WORKSPACE/localwhisper-v022"
           echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
 
