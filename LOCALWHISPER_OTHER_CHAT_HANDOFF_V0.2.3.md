@@ -52,6 +52,12 @@ SHA-256:
 
 Post-CI `apksigner verify` correctly reports that it is unsigned.
 
+Google Drive unsigned aligned APK:
+https://drive.google.com/file/d/1FuJaMlc-UO9e13y5FZOVMY8tAejnzg3G/view
+
+Google Drive SHA-256 manifest:
+https://drive.google.com/file/d/1Z_-AlOKJFy1hJ4tfjgcbEVqKayiwJ9PI/view
+
 Google Drive CI artifact bundle:
 https://drive.google.com/file/d/1z2UOe5HArrSXkI-hoFUi39gV5mxKy11J/view
 
