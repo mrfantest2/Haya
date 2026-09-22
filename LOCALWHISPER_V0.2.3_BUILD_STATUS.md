@@ -56,6 +56,12 @@ Verification gates passed in CI:
 Independent post-CI verification also confirmed the APK ZIP is intact and the arm64 native library is present. `apksigner verify` correctly reports that the APK is unsigned.
 
 ### Google Drive artifacts
+Unsigned aligned APK:
+https://drive.google.com/file/d/1FuJaMlc-UO9e13y5FZOVMY8tAejnzg3G/view
+
+SHA-256 manifest:
+https://drive.google.com/file/d/1Z_-AlOKJFy1hJ4tfjgcbEVqKayiwJ9PI/view
+
 Unsigned CI artifact bundle:
 https://drive.google.com/file/d/1z2UOe5HArrSXkI-hoFUi39gV5mxKy11J/view
 
