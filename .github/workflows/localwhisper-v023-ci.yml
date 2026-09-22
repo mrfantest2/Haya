@@ -1,0 +1,194 @@
+name: LocalWhisper v0.2.3 Exact Source Build
+
+on:
+  push:
+    branches:
+      - build/localwhisper-v0.2.3-ci
+    paths:
+      - localwhisper-v023-build.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout build branch
+        uses: actions/checkout@v4
+
+      - name: Reconstruct canonical v0.2.2 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat ci/localwhisper-v021/source00.b64 ci/localwhisper-v021/source01.b64 ci/localwhisper-v021/source02.b64 ci/localwhisper-v021/source03.b64 ci/localwhisper-v021/source04.b64 ci/localwhisper-v021/source05.b64 > /tmp/source.tar.xz.b64
+          test "$(wc -c < /tmp/source.tar.xz.b64)" -eq 58860
+          base64 -d /tmp/source.tar.xz.b64 > /tmp/source.tar.xz
+          echo '99b7246060d76b45d2fcbde2567344b204e2e5ead121a88f2cd13b836be824da  /tmp/source.tar.xz' | sha256sum -c -
+          rm -rf "$GITHUB_WORKSPACE/localwhisper-v023"
+          mkdir -p "$GITHUB_WORKSPACE/localwhisper-v023"
+          tar -xJf /tmp/source.tar.xz -C "$GITHUB_WORKSPACE/localwhisper-v023"
+          base64 -d ci/localwhisper-v022.patch.xz.b64 > /tmp/v022.patch.xz
+          xz -dc /tmp/v022.patch.xz > /tmp/v022.patch
+          cd "$GITHUB_WORKSPACE/localwhisper-v023"
+          patch -p1 < /tmp/v022.patch
+          sed -i 's/row\.setMinHeight(dp(52));/row.setMinimumHeight(dp(52));/' app/src/main/java/win/fantest/localwhisper/MainUi.java
+          PROJECT="$GITHUB_WORKSPACE/localwhisper-v023"
+          echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
+
+      - name: Verify canonical v0.2.2 tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, os
+          from pathlib import Path
+          root = Path(os.environ['PROJECT'])
+          h = hashlib.sha256()
+          count = 0
+          for p in sorted(x for x in root.rglob('*') if x.is_file() and '.git' not in x.parts):
+              rel = p.relative_to(root).as_posix().encode()
+              h.update(rel)
+              h.update(b'\0')
+              h.update(hashlib.sha256(p.read_bytes()).digest())
+              h.update(b'\n')
+              count += 1
+          digest = h.hexdigest().upper()
+          print('V022_TREE_SHA256=' + digest)
+          print('V022_FILES=' + str(count))
+          assert count == 54, count
+          assert digest == '526E13F53851854CFE76B71E624D2998A6BD5B5661F5D7C2F8DA1C0EA07E440F', digest
+          PY
+
+      - name: Apply exact v0.2.3 source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '0f9adf9daa861ab410445a73f7a6c2c32f6ff046955be4538d3b7962aa25f1a4  ci/localwhisper-v023.patch' | sha256sum -c -
+          cd "$PROJECT"
+          patch -p1 < "$GITHUB_WORKSPACE/ci/localwhisper-v023.patch"
+
+      - name: Verify exact tested v0.2.3 tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, os
+          from pathlib import Path
+          root = Path(os.environ['PROJECT'])
+          h = hashlib.sha256()
+          count = 0
+          for p in sorted(x for x in root.rglob('*') if x.is_file() and '.git' not in x.parts):
+              rel = p.relative_to(root).as_posix().encode()
+              h.update(rel)
+              h.update(b'\0')
+              h.update(hashlib.sha256(p.read_bytes()).digest())
+              h.update(b'\n')
+              count += 1
+          digest = h.hexdigest().upper()
+          print('V023_TREE_SHA256=' + digest)
+          print('V023_FILES=' + str(count))
+          assert count == 55, count
+          assert digest == '96329B619DE0D280B10AE02A92F135657B79DBDF62EA2E5A9DD76752D6D6D788', digest
+          PY
+          grep -Fq 'versionCode = 7' "$PROJECT/app/build.gradle.kts"
+          grep -Fq 'versionName = "0.2.3"' "$PROJECT/app/build.gradle.kts"
+          grep -Fq 'Persistent storage · Download/LocalWhisper/models/' "$PROJECT/app/src/main/java/win/fantest/localwhisper/MainUi.java"
+          grep -Fq 'historyExpanded ? 20 : 2' "$PROJECT/app/src/main/java/win/fantest/localwhisper/MainActivity.java"
+          grep -Fq 'Preparing voice note…' "$PROJECT/app/src/main/java/win/fantest/localwhisper/OverlayService.java"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android native toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0' 'cmake;3.22.1' 'ndk;27.2.12479018'
+
+      - name: Pin NDK for hosted build
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          p = Path(os.environ['PROJECT']) / 'app/build.gradle.kts'
+          s = p.read_text()
+          needle = '    compileSdk = 35\n'
+          assert needle in s
+          if 'ndkVersion = ' not in s:
+              s = s.replace(needle, needle + '    ndkVersion = "27.2.12479018"\n', 1)
+          p.write_text(s)
+          PY
+
+      - name: Set up Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Run full v0.2.3 regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT"
+          rm -rf /tmp/lwtests && mkdir -p /tmp/lwtests
+          javac -d /tmp/lwtests app/src/main/java/win/fantest/localwhisper/DownloadProgressEstimator.java tools/DownloadProgressEstimatorTest.java
+          java -cp /tmp/lwtests DownloadProgressEstimatorTest
+          javac -d /tmp/lwtests app/src/main/java/win/fantest/localwhisper/ModelFileInstaller.java tools/ModelFileInstallerTest.java
+          java -cp /tmp/lwtests ModelFileInstallerTest
+          javac -d /tmp/lwtests app/src/main/java/win/fantest/localwhisper/ProgressMapper.java tools/ProgressMapperTest.java
+          java -cp /tmp/lwtests ProgressMapperTest
+          javac -d /tmp/lwtests app/src/main/java/win/fantest/localwhisper/Resampler.java tools/ResamplerSmokeTest.java
+          java -cp /tmp/lwtests ResamplerSmokeTest
+          javac -d /tmp/lwtests app/src/main/java/win/fantest/localwhisper/ResumableHttpDownloader.java tools/ResumableHttpDownloaderTest.java
+          java -cp /tmp/lwtests ResumableHttpDownloaderTest
+          python3 tools/source_contract_test.py
+          python3 tools/main_ui_contract_test.py
+          python3 tools/v021_contract_test.py
+          python3 tools/v022_visual_contract_test.py
+          python3 tools/v023_visual_contract_test.py
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          ET.parse('app/src/main/AndroidManifest.xml')
+          print('PASS manifest XML')
+          PY
+
+      - name: Build unsigned arm64 release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT"
+          gradle --no-daemon clean assembleRelease --stacktrace
+
+      - name: Align and verify unsigned APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC="$PROJECT/app/build/outputs/apk/release/app-release-unsigned.apk"
+          test -s "$SRC"
+          mkdir -p artifacts
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -f -p 4 "$SRC" artifacts/LocalWhisper-v0.2.3-unsigned-aligned.apk
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -v 4 artifacts/LocalWhisper-v0.2.3-unsigned-aligned.apk >/dev/null
+          unzip -t artifacts/LocalWhisper-v0.2.3-unsigned-aligned.apk >/dev/null
+          unzip -l artifacts/LocalWhisper-v0.2.3-unsigned-aligned.apk | grep -Fq 'lib/arm64-v8a/liblocalwhisper.so'
+          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" artifacts/apksigner.jar
+          tar -cJf artifacts/LocalWhisper-v0.2.3-source.tar.xz -C "$PROJECT" .
+          sha256sum artifacts/LocalWhisper-v0.2.3-unsigned-aligned.apk artifacts/LocalWhisper-v0.2.3-source.tar.xz | tee artifacts/SHA256SUMS.txt
+
+      - name: Upload unsigned APK and exact source
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocalWhisper-v0.2.3-unsigned-current
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 3
