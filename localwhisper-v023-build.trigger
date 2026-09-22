@@ -5,3 +5,4 @@ retry: exact changed-file hash verification
 retry: uploaded patch checksum pinned
 retry: restore patch LF in CI
 retry: restored patch direct apply
+retry: hosted Android SDK direct
