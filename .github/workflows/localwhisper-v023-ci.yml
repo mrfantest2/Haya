@@ -53,7 +53,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo '0f9adf9daa861ab410445a73f7a6c2c32f6ff046955be4538d3b7962aa25f1a4  ci/localwhisper-v023.patch' | sha256sum -c -
+          echo '62021b42e60f9e6374a5d37d394746fc8b869dfbd4fd7dc21233363786a7b57c  ci/localwhisper-v023.patch' | sha256sum -c -
           cd "$PROJECT"
           patch -p1 < "$GITHUB_WORKSPACE/ci/localwhisper-v023.patch"
 
