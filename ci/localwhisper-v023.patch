@@ -1,0 +1,516 @@
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+index 39d61e6..118ac6a 100644
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -10,8 +10,8 @@ android {
+         applicationId = "win.fantest.localwhisper"
+         minSdk = 26
+         targetSdk = 35
+-        versionCode = 6
+-        versionName = "0.2.2"
++        versionCode = 7
++        versionName = "0.2.3"
+ 
+         ndk {
+             abiFilters += listOf("arm64-v8a")
+diff --git a/app/src/main/java/win/fantest/localwhisper/MainActivity.java b/app/src/main/java/win/fantest/localwhisper/MainActivity.java
+index 3f3b553..ca6606f 100644
+--- a/app/src/main/java/win/fantest/localwhisper/MainActivity.java
++++ b/app/src/main/java/win/fantest/localwhisper/MainActivity.java
+@@ -366,7 +366,7 @@ public final class MainActivity extends Activity {
+         ModelDownloadStateStore.Snapshot state = downloads.snapshot();
+ 
+         String fileName = ModelCatalog.get(selected).fileName;
+-        ui.downloadPath.setText("▣  Stored in: Download/LocalWhisper/models/\n    " + fileName);
++        ui.downloadPath.setText("▣  Persistent storage · Download/LocalWhisper/models/ · " + fileName);
+ 
+         boolean selectedTransfer = selected.equals(state.modelId);
+         if (selectedTransfer && state.isActive()) {
+@@ -470,8 +470,8 @@ public final class MainActivity extends Activity {
+             return;
+         }
+ 
+-        int limit = Math.min(jobs.size(), historyExpanded ? 20 : 3);
+-        ui.recentSeeAll.setVisibility(jobs.size() > 3 ? View.VISIBLE : View.GONE);
++        int limit = Math.min(jobs.size(), historyExpanded ? 20 : 2);
++        ui.recentSeeAll.setVisibility(jobs.size() > 2 ? View.VISIBLE : View.GONE);
+         ui.recentSeeAll.setText(historyExpanded ? "Show less" : "See all");
+ 
+         DateFormat df = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT, Locale.getDefault());
+@@ -506,9 +506,13 @@ public final class MainActivity extends Activity {
+             copyLp.leftMargin = ui.dp(9);
+             titleRow.addView(titleCopy, copyLp);
+ 
+-            TextView state = ui.newText(job.status, 10, true);
++            TextView state = ui.newText(job.status, 9, true);
+             state.setTextColor(TranscriptDb.DONE.equals(job.status) ? MainUi.ACCENT : MainUi.MUTED);
+             titleRow.addView(state);
++            TextView more = ui.newText("⋮", 18, true);
++            more.setTextColor(MainUi.MUTED);
++            more.setPadding(ui.dp(7), 0, 0, 0);
++            titleRow.addView(more);
+             card.addView(titleRow);
+ 
+             String body = TranscriptDb.DONE.equals(job.status)
+@@ -516,27 +520,34 @@ public final class MainActivity extends Activity {
+                     : (TranscriptDb.FAILED.equals(job.status) ? "Error: " + job.error : "Waiting…");
+             TextView bodyView = ui.newText(body, 12, false);
+             bodyView.setTextColor(MainUi.MUTED);
+-            bodyView.setMaxLines(historyExpanded ? 3 : 2);
++            bodyView.setMaxLines(2);
+             bodyView.setEllipsize(android.text.TextUtils.TruncateAt.END);
+             bodyView.setTextIsSelectable(true);
+-            bodyView.setPadding(ui.dp(41), ui.dp(6), 0, 0);
++            bodyView.setPadding(ui.dp(41), ui.dp(5), 0, 0);
+             card.addView(bodyView);
+ 
+             if (TranscriptDb.DONE.equals(job.status)) {
+                 LinearLayout actions = new LinearLayout(this);
+                 actions.setOrientation(LinearLayout.HORIZONTAL);
++                actions.setVisibility(View.GONE);
+                 Button copy = ui.newSmallButton("▣  Copy");
+                 copy.setOnClickListener(v -> copy(job.text));
+                 Button share = ui.newSmallButton("↗  Share");
+                 share.setOnClickListener(v -> share(job.text));
+-                actions.addView(copy, new LinearLayout.LayoutParams(0, ui.dp(36), 1f));
+-                LinearLayout.LayoutParams shareLp = new LinearLayout.LayoutParams(0, ui.dp(36), 1f);
++                actions.addView(copy, new LinearLayout.LayoutParams(0, ui.dp(34), 1f));
++                LinearLayout.LayoutParams shareLp = new LinearLayout.LayoutParams(0, ui.dp(34), 1f);
+                 shareLp.leftMargin = ui.dp(7);
+                 actions.addView(share, shareLp);
+                 LinearLayout.LayoutParams actionsLp = new LinearLayout.LayoutParams(-1, -2);
+                 actionsLp.leftMargin = ui.dp(41);
+-                actionsLp.topMargin = ui.dp(7);
++                actionsLp.topMargin = ui.dp(6);
+                 card.addView(actions, actionsLp);
++                card.setOnClickListener(v -> {
++                    boolean reveal = actions.getVisibility() != View.VISIBLE;
++                    actions.setVisibility(reveal ? View.VISIBLE : View.GONE);
++                    bodyView.setMaxLines(reveal ? 4 : 2);
++                    more.setText(reveal ? "⌃" : "⋮");
++                });
+             }
+ 
+             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+diff --git a/app/src/main/java/win/fantest/localwhisper/MainUi.java b/app/src/main/java/win/fantest/localwhisper/MainUi.java
+index 5069924..f784146 100644
+--- a/app/src/main/java/win/fantest/localwhisper/MainUi.java
++++ b/app/src/main/java/win/fantest/localwhisper/MainUi.java
+@@ -74,14 +74,14 @@ public final class MainUi {
+         header.setGravity(Gravity.CENTER_VERTICAL);
+         ImageView icon = new ImageView(activity);
+         icon.setImageResource(R.drawable.ic_launcher);
+-        LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(dp(44), dp(44));
+-        iconLp.rightMargin = dp(10);
++        LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(dp(40), dp(40));
++        iconLp.rightMargin = dp(9);
+         header.addView(icon, iconLp);
+ 
+         LinearLayout headerCopy = new LinearLayout(activity);
+         headerCopy.setOrientation(LinearLayout.VERTICAL);
+-        TextView title = text("Local Whisper", 27, true);
+-        TextView subtitle = text("Private. On-device. Yours.", 12, false);
++        TextView title = text("Local Whisper", 25, true);
++        TextView subtitle = text("Private. On-device. Yours.", 11, false);
+         subtitle.setTextColor(MUTED);
+         headerCopy.addView(title);
+         headerCopy.addView(subtitle);
+@@ -97,9 +97,9 @@ public final class MainUi {
+         header.addView(headerActions);
+         content.addView(header);
+ 
+-        TextView intro = text("Share a WhatsApp voice note here. Transcription stays on this phone.", 13, false);
++        TextView intro = text("Share a WhatsApp voice note here. Transcription stays on this phone.", 12, false);
+         intro.setTextColor(MUTED);
+-        intro.setPadding(dp(54), dp(3), dp(4), dp(5));
++        intro.setPadding(dp(49), dp(2), dp(4), dp(4));
+         content.addView(intro);
+ 
+         // Model picker
+@@ -108,14 +108,14 @@ public final class MainUi {
+         TextView modelLabel = text("◇  Model", 14, true);
+         modelRow.addView(modelLabel, new LinearLayout.LayoutParams(0, -2, 0.38f));
+         modelSpinner = spinner(new String[]{"Quality · Large v3 Turbo Q5", "Fast · Base multilingual"});
+-        modelRow.addView(modelSpinner, new LinearLayout.LayoutParams(0, dp(48), 0.62f));
++        modelRow.addView(modelSpinner, new LinearLayout.LayoutParams(0, dp(44), 0.62f));
+         modelCard.addView(modelRow);
+         content.addView(modelCard, cardLp(10));
+ 
+         // Model status/download card
+         downloadCard = card(dp(14));
+         LinearLayout stateRow = horizontal();
+-        downloadTitle = text("Model not installed", 17, true);
++        downloadTitle = text("Model not installed", 16, true);
+         downloadTitle.setTextColor(ACCENT_DARK);
+         stateRow.addView(downloadTitle, new LinearLayout.LayoutParams(0, -2, 1f));
+         modelStateChip = chip("NOT INSTALLED", Color.rgb(245, 247, 246), MUTED);
+@@ -124,7 +124,7 @@ public final class MainUi {
+ 
+         downloadMeta = text("Download the selected offline model once.", 12, false);
+         downloadMeta.setTextColor(MUTED);
+-        downloadMeta.setPadding(0, dp(4), 0, dp(8));
++        downloadMeta.setPadding(0, dp(2), 0, dp(6));
+         downloadCard.addView(downloadMeta);
+ 
+         downloadProgress = new ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal);
+@@ -137,29 +137,26 @@ public final class MainUi {
+         downloadAction = primaryButton("Download selected model");
+         cancelDownload = secondaryButton("Cancel");
+         cancelDownload.setVisibility(View.GONE);
+-        downloadActions.addView(downloadAction, new LinearLayout.LayoutParams(0, dp(48), 1f));
+-        LinearLayout.LayoutParams cancelLp = new LinearLayout.LayoutParams(dp(106), dp(48));
++        downloadActions.addView(downloadAction, new LinearLayout.LayoutParams(0, dp(44), 1f));
++        LinearLayout.LayoutParams cancelLp = new LinearLayout.LayoutParams(dp(102), dp(44));
+         cancelLp.setMargins(dp(8), 0, 0, 0);
+         downloadActions.addView(cancelDownload, cancelLp);
+         LinearLayout.LayoutParams actionsLp = new LinearLayout.LayoutParams(-1, -2);
+         actionsLp.topMargin = dp(8);
+         downloadCard.addView(downloadActions, actionsLp);
+ 
+-        downloadPath = text("▣  Stored in: Download/LocalWhisper/models/", 12, false);
++        downloadPath = text("▣  Persistent storage · Download/LocalWhisper/models/", 11, false);
+         downloadPath.setTextColor(MUTED);
+-        downloadPath.setPadding(dp(10), dp(9), dp(10), dp(9));
++        downloadPath.setSingleLine(true);
++        downloadPath.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
++        downloadPath.setPadding(dp(10), dp(8), dp(10), dp(8));
+         downloadPath.setBackground(round(Color.rgb(246, 249, 248), 12, BORDER, 1));
+         LinearLayout.LayoutParams pathLp = new LinearLayout.LayoutParams(-1, -2);
+         pathLp.topMargin = dp(9);
+         downloadCard.addView(downloadPath, pathLp);
+ 
+         backupNote = text("✓ Persistent model backup survives future app updates/reinstalls.", 11, true);
+-        backupNote.setTextColor(ACCENT_DARK);
+-        backupNote.setPadding(dp(10), dp(8), dp(10), dp(8));
+-        backupNote.setBackground(round(SOFT_GREEN, 12, 0, 0));
+-        LinearLayout.LayoutParams noteLp = new LinearLayout.LayoutParams(-1, -2);
+-        noteLp.topMargin = dp(7);
+-        downloadCard.addView(backupNote, noteLp);
++        backupNote.setVisibility(View.GONE);
+         content.addView(downloadCard, cardLp(8));
+ 
+         existingModel = secondaryButton("▣  Use existing model file     ›");
+@@ -173,10 +170,19 @@ public final class MainUi {
+         settingsAnchor = card(dp(14));
+         languageSpinner = spinner(new String[]{"Auto detect", "Arabic", "English"});
+         outputSpinner = spinner(new String[]{"Original language", "English translation", "Original + English"});
+-        settingsAnchor.addView(selectorRow("◎", "Language", languageSpinner));
+-        settingsAnchor.addView(divider());
+-        settingsAnchor.addView(selectorRow("▤", "Output", outputSpinner));
+-        settingsAnchor.addView(divider());
++        LinearLayout selectorTiles = horizontal();
++        LinearLayout languageTile = selectorTile("◎", "Language", languageSpinner);
++        LinearLayout outputTile = selectorTile("▤", "Output", outputSpinner);
++        selectorTiles.addView(languageTile, new LinearLayout.LayoutParams(0, -2, 1f));
++        LinearLayout.LayoutParams outputTileLp = new LinearLayout.LayoutParams(0, -2, 1f);
++        outputTileLp.leftMargin = dp(8);
++        selectorTiles.addView(outputTile, outputTileLp);
++        settingsAnchor.addView(selectorTiles);
++        LinearLayout.LayoutParams settingsDividerLp = new LinearLayout.LayoutParams(-1, dp(1));
++        settingsDividerLp.topMargin = dp(8);
++        View settingsDivider = divider();
++        settingsDivider.setLayoutParams(settingsDividerLp);
++        settingsAnchor.addView(settingsDivider);
+ 
+         timestampsSwitch = toggle("◷  Include timestamps");
+         keepAudioSwitch = toggle("♪  Keep imported audio");
+@@ -194,13 +200,13 @@ public final class MainUi {
+         content.addView(settingsAnchor, cardLp(7));
+ 
+         saveSettings = primaryButton("⚙  Save settings");
+-        content.addView(saveSettings, fullButtonLp(8, 48));
++        content.addView(saveSettings, fullButtonLp(8, 44));
+         processPending = secondaryGreenButton("▶  Process pending audio");
+-        content.addView(processPending, fullButtonLp(7, 48));
++        content.addView(processPending, fullButtonLp(7, 44));
+ 
+         status = text("● Model not installed · Queue 0", 12, true);
+         status.setTextColor(MUTED);
+-        status.setPadding(dp(3), dp(10), 0, dp(4));
++        status.setPadding(dp(3), dp(8), 0, dp(2));
+         content.addView(status);
+ 
+         LinearLayout recentTitle = horizontal();
+@@ -218,7 +224,7 @@ public final class MainUi {
+ 
+     public LinearLayout newHistoryCard() {
+         LinearLayout c = card(dp(12));
+-        c.setPadding(dp(12), dp(10), dp(12), dp(10));
++        c.setPadding(dp(10), dp(8), dp(10), dp(8));
+         return c;
+     }
+ 
+@@ -227,7 +233,7 @@ public final class MainUi {
+     public Button newSmallButton(String value) {
+         Button b = secondaryButton(value);
+         b.setTextSize(11);
+-        b.setMinHeight(dp(36));
++        b.setMinHeight(dp(34));
+         b.setPadding(dp(8), 0, dp(8), 0);
+         return b;
+     }
+@@ -236,14 +242,17 @@ public final class MainUi {
+         return Math.round(value * activity.getResources().getDisplayMetrics().density);
+     }
+ 
+-    private LinearLayout selectorRow(String icon, String label, Spinner spinner) {
+-        LinearLayout row = horizontal();
+-        row.setMinimumHeight(dp(52));
+-        TextView left = text(icon + "  " + label, 13, true);
+-        row.addView(left, new LinearLayout.LayoutParams(0, -2, 0.42f));
+-        spinner.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+-        row.addView(spinner, new LinearLayout.LayoutParams(0, dp(48), 0.58f));
+-        return row;
++    private LinearLayout selectorTile(String icon, String label, Spinner spinner) {
++        LinearLayout tile = new LinearLayout(activity);
++        tile.setOrientation(LinearLayout.VERTICAL);
++        tile.setPadding(dp(10), dp(8), dp(10), dp(7));
++        tile.setBackground(round(Color.rgb(248, 250, 249), 12, BORDER, 1));
++        TextView caption = text(icon + "  " + label, 11, true);
++        caption.setTextColor(MUTED);
++        tile.addView(caption);
++        spinner.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
++        tile.addView(spinner, new LinearLayout.LayoutParams(-1, dp(42)));
++        return tile;
+     }
+ 
+     private void applySafeInsets(View view) {
+@@ -275,7 +284,7 @@ public final class MainUi {
+     private LinearLayout card(int radiusDp) {
+         LinearLayout c = new LinearLayout(activity);
+         c.setOrientation(LinearLayout.VERTICAL);
+-        c.setPadding(dp(14), dp(12), dp(14), dp(12));
++        c.setPadding(dp(12), dp(10), dp(12), dp(10));
+         c.setBackground(round(CARD, radiusDp, BORDER, 1));
+         c.setElevation(dp(1));
+         return c;
+@@ -323,7 +332,7 @@ public final class MainUi {
+     private Spinner spinner(String[] values) {
+         Spinner s = new Spinner(activity);
+         s.setAdapter(new ArrayAdapter<>(activity, android.R.layout.simple_spinner_dropdown_item, values));
+-        s.setMinimumHeight(dp(46));
++        s.setMinimumHeight(dp(42));
+         return s;
+     }
+ 
+@@ -332,7 +341,7 @@ public final class MainUi {
+         s.setText(label);
+         s.setTextSize(13);
+         s.setTextColor(TEXT);
+-        s.setMinHeight(dp(50));
++        s.setMinHeight(dp(46));
+         s.setGravity(Gravity.CENTER_VERTICAL);
+         return s;
+     }
+diff --git a/app/src/main/java/win/fantest/localwhisper/OverlayService.java b/app/src/main/java/win/fantest/localwhisper/OverlayService.java
+index 12a069c..46ae3c3 100644
+--- a/app/src/main/java/win/fantest/localwhisper/OverlayService.java
++++ b/app/src/main/java/win/fantest/localwhisper/OverlayService.java
+@@ -75,7 +75,7 @@ public final class OverlayService extends Service {
+         );
+         params.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+         params.x = 0;
+-        params.y = dp(12);
++        params.y = dp(16);
+         windowManager.addView(root, params);
+         registerProgressReceiver();
+         render(stateStore.snapshot());
+@@ -84,17 +84,17 @@ public final class OverlayService extends Service {
+     private LinearLayout buildOverlay() {
+         LinearLayout outer = new LinearLayout(this);
+         outer.setOrientation(LinearLayout.VERTICAL);
+-        outer.setPadding(dp(10), dp(6), dp(10), dp(10));
++        outer.setPadding(dp(8), dp(4), dp(8), dp(8));
+         LinearLayout.LayoutParams match = new LinearLayout.LayoutParams(-1, -2);
+ 
+         LinearLayout card = new LinearLayout(this);
+         card.setOrientation(LinearLayout.VERTICAL);
+-        card.setPadding(dp(14), dp(7), dp(14), dp(13));
+-        card.setBackground(round(Color.WHITE, 24, Color.rgb(218, 229, 224), 1));
++        card.setPadding(dp(12), dp(5), dp(12), dp(10));
++        card.setBackground(round(Color.WHITE, 22, Color.rgb(218, 229, 224), 1));
+         card.setElevation(dp(8));
+         outer.addView(card, match);
+ 
+-        TextView handle = text("━", 18, false);
++        TextView handle = text("━", 16, false);
+         handle.setGravity(Gravity.CENTER);
+         handle.setTextColor(Color.rgb(150, 159, 155));
+         card.addView(handle, match);
+@@ -106,15 +106,15 @@ public final class OverlayService extends Service {
+ 
+         ImageView icon = new ImageView(this);
+         icon.setImageResource(R.drawable.ic_launcher);
+-        LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(dp(42), dp(42));
+-        iconLp.rightMargin = dp(10);
++        LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(dp(38), dp(38));
++        iconLp.rightMargin = dp(9);
+         header.addView(icon, iconLp);
+ 
+         LinearLayout heading = new LinearLayout(this);
+         heading.setOrientation(LinearLayout.VERTICAL);
+-        stageView = text("Preparing…", 16, true);
++        stageView = text("Preparing voice note…", 15, true);
+         stageView.setTextColor(ACCENT_DARK);
+-        nameView = text("Voice note", 11, false);
++        nameView = text("Voice note", 10, false);
+         nameView.setTextColor(MUTED);
+         heading.addView(stageView);
+         heading.addView(nameView);
+@@ -122,12 +122,12 @@ public final class OverlayService extends Service {
+ 
+         Button close = smallButton("×");
+         close.setOnClickListener(v -> stopSelf());
+-        header.addView(close, new LinearLayout.LayoutParams(dp(42), dp(42)));
++        header.addView(close, new LinearLayout.LayoutParams(dp(38), dp(38)));
+         card.addView(header, match);
+ 
+-        TextView device = text("On-device · Local Whisper", 10, false);
++        TextView device = text("On-device · Local Whisper", 9, false);
+         device.setTextColor(MUTED);
+-        device.setPadding(dp(52), dp(1), 0, 0);
++        device.setPadding(dp(47), 0, 0, 0);
+         card.addView(device);
+ 
+         LinearLayout progressRow = new LinearLayout(this);
+@@ -142,24 +142,24 @@ public final class OverlayService extends Service {
+         percentView.setPadding(dp(9), 0, 0, 0);
+         progressRow.addView(percentView);
+         LinearLayout.LayoutParams progressLp = new LinearLayout.LayoutParams(-1, -2);
+-        progressLp.topMargin = dp(9);
++        progressLp.topMargin = dp(7);
+         card.addView(progressRow, progressLp);
+ 
+-        previewView = text("Preparing voice note…", 14, false);
++        previewView = text("Preparing voice note…", 13, false);
+         previewView.setTextIsSelectable(true);
+-        previewView.setMaxLines(4);
+-        previewView.setPadding(dp(12), dp(11), dp(12), dp(11));
++        previewView.setMaxLines(3);
++        previewView.setPadding(dp(10), dp(9), dp(10), dp(9));
+         previewView.setBackground(round(Color.rgb(246, 249, 248), 14, Color.rgb(232, 238, 235), 1));
+         LinearLayout.LayoutParams previewLp = new LinearLayout.LayoutParams(-1, -2);
+-        previewLp.topMargin = dp(10);
++        previewLp.topMargin = dp(8);
+         card.addView(previewView, previewLp);
+ 
+-        TextView reassurance = text("✓  Transcription continues in the background — you can keep using this chat.", 11, false);
++        TextView reassurance = text("✓  Transcription continues in the background — you can keep using this chat.", 10, false);
+         reassurance.setTextColor(ACCENT_DARK);
+-        reassurance.setPadding(dp(10), dp(9), dp(10), dp(9));
++        reassurance.setPadding(dp(9), dp(7), dp(9), dp(7));
+         reassurance.setBackground(round(Color.rgb(231, 248, 241), 13, 0, 0));
+         LinearLayout.LayoutParams reassureLp = new LinearLayout.LayoutParams(-1, -2);
+-        reassureLp.topMargin = dp(8);
++        reassureLp.topMargin = dp(7);
+         card.addView(reassurance, reassureLp);
+ 
+         LinearLayout actions = new LinearLayout(this);
+@@ -178,14 +178,14 @@ public final class OverlayService extends Service {
+         actions.addView(share, weight());
+         actions.addView(open, weight());
+         LinearLayout.LayoutParams actionLp = new LinearLayout.LayoutParams(-1, -2);
+-        actionLp.topMargin = dp(9);
++        actionLp.topMargin = dp(7);
+         card.addView(actions, actionLp);
+         return outer;
+     }
+ 
+     private void render(TranscriptionStateStore.Snapshot snapshot) {
+         if (root == null || snapshot == null) return;
+-        stageView.setText(snapshot.stage == null || snapshot.stage.isBlank() ? "Preparing…" : snapshot.stage);
++        stageView.setText(snapshot.stage == null || snapshot.stage.isBlank() ? "Preparing voice note…" : snapshot.stage);
+         nameView.setText(snapshot.name == null || snapshot.name.isBlank() ? "WhatsApp voice note" : snapshot.name);
+         boolean determinate = snapshot.progress >= 0;
+         int progress = determinate ? Math.max(0, Math.min(100, snapshot.progress)) : 0;
+@@ -200,7 +200,7 @@ public final class OverlayService extends Service {
+ 
+     private void toggleExpanded() {
+         expanded = !expanded;
+-        previewView.setMaxLines(expanded ? 12 : 4);
++        previewView.setMaxLines(expanded ? 10 : 3);
+         expandButton.setText(expanded ? "↙\nCollapse" : "↗\nExpand");
+         if (windowManager != null && root != null) windowManager.updateViewLayout(root, params);
+     }
+@@ -268,7 +268,7 @@ public final class OverlayService extends Service {
+         b.setTextSize(10);
+         b.setTextColor(Color.rgb(28, 35, 32));
+         b.setGravity(Gravity.CENTER);
+-        b.setMinHeight(dp(58));
++        b.setMinHeight(dp(54));
+         b.setPadding(dp(3), dp(3), dp(3), dp(3));
+         b.setBackground(round(Color.rgb(248, 250, 249), 14, Color.rgb(229, 235, 232), 1));
+         return b;
+@@ -288,7 +288,7 @@ public final class OverlayService extends Service {
+     }
+ 
+     private LinearLayout.LayoutParams weight() {
+-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(64), 1f);
++        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(58), 1f);
+         lp.setMargins(dp(2), 0, dp(2), 0);
+         return lp;
+     }
+diff --git a/tools/v021_contract_test.py b/tools/v021_contract_test.py
+index a3c9a17..8fff8a9 100644
+--- a/tools/v021_contract_test.py
++++ b/tools/v021_contract_test.py
+@@ -29,5 +29,5 @@ require('@mipmap/ic_launcher' in manifest, 'manifest must use adaptive launcher
+ require('@mipmap/ic_launcher_round' in manifest, 'manifest round icon missing')
+ require((root/'app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml').exists(), 'adaptive launcher icon missing')
+ require((root/'app/src/main/res/drawable/ic_notification.xml').exists(), 'notification icon missing')
+-require(('versionCode = 5' in gradle or 'versionCode = 6' in gradle), 'versionCode must preserve v0.2.1+ update lineage')
++require(('versionCode = 5' in gradle or 'versionCode = 6' in gradle or 'versionCode = 7' in gradle), 'versionCode must preserve v0.2.1+ update lineage')
+ print('PASS v021_contract_test')
+diff --git a/tools/v022_visual_contract_test.py b/tools/v022_visual_contract_test.py
+index e5a1e59..c16b8d8 100644
+--- a/tools/v022_visual_contract_test.py
++++ b/tools/v022_visual_contract_test.py
+@@ -5,12 +5,12 @@ main = (root/'app/src/main/java/win/fantest/localwhisper/MainActivity.java').rea
+ overlay = (root/'app/src/main/java/win/fantest/localwhisper/OverlayService.java').read_text()
+ build = (root/'app/build.gradle.kts').read_text()
+ checks = {
+-    'v022 version': 'versionCode = 6' in build and 'versionName = "0.2.2"' in build,
+-    'compact persistent path': 'Stored in: Download/LocalWhisper/models/' in ui,
++    'v022+ update lineage': ('versionCode = 6' in build or 'versionCode = 7' in build),
++    'compact persistent path': 'Download/LocalWhisper/models/' in ui,
+     'model installed chip': 'modelStateChip' in ui,
+     'header settings shortcut': 'settingsShortcut' in ui,
+     'recent see all': 'recentSeeAll' in ui and 'historyExpanded' in main,
+-    'history default compact': 'Math.min(jobs.size(), historyExpanded ? 20 : 3)' in main,
++    'history default compact': ('historyExpanded ? 20 : 3' in main or 'historyExpanded ? 20 : 2' in main),
+     'overlay background reassurance': 'Transcription continues in the background' in overlay,
+     'overlay branded icon': 'ic_launcher' in overlay,
+     'overlay open label': 'Open in\\nLocal Whisper' in overlay,
+diff --git a/tools/v023_visual_contract_test.py b/tools/v023_visual_contract_test.py
+new file mode 100644
+index 0000000..e9b13fe
+--- /dev/null
++++ b/tools/v023_visual_contract_test.py
+@@ -0,0 +1,27 @@
++from pathlib import Path
++root = Path(__file__).resolve().parents[1]
++ui = (root/'app/src/main/java/win/fantest/localwhisper/MainUi.java').read_text()
++main = (root/'app/src/main/java/win/fantest/localwhisper/MainActivity.java').read_text()
++overlay = (root/'app/src/main/java/win/fantest/localwhisper/OverlayService.java').read_text()
++build = (root/'app/build.gradle.kts').read_text()
++
++checks = {
++    'v023 version': 'versionCode = 7' in build and 'versionName = "0.2.3"' in build,
++    'safe area retained': 'setOnApplyWindowInsetsListener' in ui,
++    'persistent storage row': 'Persistent storage · Download/LocalWhisper/models/' in ui,
++    'developer backup block hidden': 'backupNote.setVisibility(View.GONE)' in ui,
++    'language output tiles': 'selectorTile("◎", "Language"' in ui and 'selectorTile("▤", "Output"' in ui,
++    'two recent default': 'historyExpanded ? 20 : 2' in main,
++    'recent actions collapsed': 'actions.setVisibility(View.GONE)' in main,
++    'tap expand actions': 'card.setOnClickListener' in main and 'actions.setVisibility(reveal ? View.VISIBLE : View.GONE)' in main,
++    'see all retained': 'recentSeeAll' in ui and 'historyExpanded' in main,
++    'overlay bottom sheet': 'Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL' in overlay,
++    'truthful preparing stage': 'Preparing voice note…' in overlay and 'Listening' not in overlay,
++    'overlay reassurance': 'Transcription continues in the background' in overlay,
++    'overlay quick actions': 'Expand' in overlay and 'Copy' in overlay and 'Share' in overlay and 'Open in\\nLocal Whisper' in overlay,
++    'overlay compact actions': 'new LinearLayout.LayoutParams(0, dp(58), 1f)' in overlay,
++}
++failed = [name for name, ok in checks.items() if not ok]
++if failed:
++    raise SystemExit('FAIL: ' + ', '.join(failed))
++print('PASS: v0.2.3 visual contract')
