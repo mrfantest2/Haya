@@ -94,7 +94,6 @@ jobs:
           cat <<'SUMS' | sha256sum -c -
           b3b50af52758d38dda30284e7570d7372542e5d44c83eebff6b123bc0dc32763  app/build.gradle.kts
           a0aa30e3dd1ed3d2c8f1220158b17e73c9d2d647ff9804e3841b7ff44479f871  app/src/main/cpp/CMakeLists.txt
-          ed7cb66cd3092dbeb2e47140632f43213c880acf248fe2cbad33e8c4ed005650  app/src/main/cpp/native-lib.cpp
           772a8ced1695958a1d3773f47c63714725f9e0e596df29e2949e057488524ed9  app/src/main/java/win/fantest/localwhisper/AppPrefs.java
           e6d9cab5e6a175ebedf4d207c4364dcfd0aa353d12f30deb6468a925e07d7d83  app/src/main/java/win/fantest/localwhisper/MainActivity.java
           fd469afa670104ffc3c088d79f8650ed4c76d050bc245a8fa689b3680401161d  app/src/main/java/win/fantest/localwhisper/MainUi.java
