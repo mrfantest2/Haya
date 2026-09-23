@@ -1,0 +1,431 @@
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+index 118ac6a..ab30542 100644
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -10,8 +10,8 @@ android {
+         applicationId = "win.fantest.localwhisper"
+         minSdk = 26
+         targetSdk = 35
+-        versionCode = 7
+-        versionName = "0.2.3"
++        versionCode = 8
++        versionName = "0.2.4"
+ 
+         ndk {
+             abiFilters += listOf("arm64-v8a")
+@@ -26,7 +26,9 @@ android {
+                     "-DWHISPER_BUILD_TESTS=OFF",
+                     "-DWHISPER_BUILD_SERVER=OFF",
+                     "-DGGML_OPENMP=OFF",
+-                    "-DGGML_NATIVE=OFF"
++                    "-DGGML_NATIVE=OFF",
++                    "-DGGML_CPU_REPACK=ON",
++                    "-DGGML_CPU_KLEIDIAI=ON"
+                 )
+             }
+         }
+diff --git a/app/src/main/cpp/CMakeLists.txt b/app/src/main/cpp/CMakeLists.txt
+index bdc2bb6..f9e3e2e 100644
+--- a/app/src/main/cpp/CMakeLists.txt
++++ b/app/src/main/cpp/CMakeLists.txt
+@@ -9,6 +9,8 @@ set(WHISPER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+ set(WHISPER_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+ set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
+ set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
++set(GGML_CPU_REPACK ON CACHE BOOL "" FORCE)
++set(GGML_CPU_KLEIDIAI ON CACHE BOOL "" FORCE)
+ 
+ include(FetchContent)
+ 
+diff --git a/app/src/main/cpp/native-lib.cpp b/app/src/main/cpp/native-lib.cpp
+index 59e89eb..164ad7f 100644
+--- a/app/src/main/cpp/native-lib.cpp
++++ b/app/src/main/cpp/native-lib.cpp
+@@ -1,6 +1,7 @@
+ #include <jni.h>
+ #include <android/log.h>
+ #include <algorithm>
++#include <chrono>
+ #include <cctype>
+ #include <cstdio>
+ #include <sstream>
+@@ -167,6 +168,7 @@ Java_win_fantest_localwhisper_WhisperNative_transcribe(
+         jstring language,
+         jboolean translate,
+         jboolean includeTimestamps,
++        jstring performanceProfile,
+         jobject progressListener) {
+ 
+     auto *engine = reinterpret_cast<Engine *>(handle);
+@@ -183,7 +185,14 @@ Java_win_fantest_localwhisper_WhisperNative_transcribe(
+     std::string lang = jstringToUtf8(env, language);
+     if (lang.empty()) lang = "auto";
+ 
+-    whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_BEAM_SEARCH);
++    std::string performance = jstringToUtf8(env, performanceProfile);
++    if (performance != "balanced" && performance != "accurate") performance = "fast";
++    const bool fastMode = performance == "fast";
++    const bool balancedMode = performance == "balanced";
++    const whisper_sampling_strategy strategy =
++            fastMode ? WHISPER_SAMPLING_GREEDY : WHISPER_SAMPLING_BEAM_SEARCH;
++
++    whisper_full_params params = whisper_full_default_params(strategy);
+     params.print_realtime = false;
+     params.print_progress = false;
+     params.print_timestamps = false;
+@@ -200,10 +209,21 @@ Java_win_fantest_localwhisper_WhisperNative_transcribe(
+     params.temperature = 0.0f;
+     params.temperature_inc = 0.2f;
+ 
+-    // Short voice notes benefit from a wider beam; longer clips stay practical.
+     const float seconds = sampleCount / 16000.0f;
+-    params.beam_search.beam_size = seconds <= 20.0f ? 8 : 5;
+-    params.beam_search.patience = 1.0f;
++    if (fastMode) {
++        // Fast keeps the same Large v3 Turbo model and prompt, but removes expensive
++        // multi-candidate beam search. This is the default daily-use profile.
++        params.greedy.best_of = 1;
++    } else if (balancedMode) {
++        // A small beam is useful for difficult/code-switched speech without paying the
++        // original 5-8 beam latency cost.
++        params.beam_search.beam_size = seconds <= 20.0f ? 3 : 2;
++        params.beam_search.patience = 1.0f;
++    } else {
++        // Maximum accuracy preserves the v0.2.3 decoding behavior.
++        params.beam_search.beam_size = seconds <= 20.0f ? 8 : 5;
++        params.beam_search.patience = 1.0f;
++    }
+ 
+     // Voice notes are speech-first. A slightly lower no-speech threshold helps retain
+     // quiet words at the start/end instead of dropping them.
+@@ -223,7 +243,15 @@ Java_win_fantest_localwhisper_WhisperNative_transcribe(
+     }
+ 
+     const unsigned int hc = std::max(1u, std::thread::hardware_concurrency());
+-    params.n_threads = static_cast<int>(std::clamp(hc > 2 ? hc - 2 : hc, 2u, 8u));
++    unsigned int desiredThreads = hc;
++    if (balancedMode && desiredThreads > 1u) desiredThreads -= 1u;
++    if (!fastMode && !balancedMode && desiredThreads > 2u) desiredThreads -= 2u;
++    params.n_threads = static_cast<int>(std::min(8u, std::max(2u, desiredThreads)));
++
++    LOGI("transcribe start profile=%s seconds=%.2f threads=%d strategy=%s",
++         performance.c_str(), seconds, params.n_threads,
++         fastMode ? "greedy" : "beam");
++    const auto inferenceStarted = std::chrono::steady_clock::now();
+ 
+     JavaProgress callbackState;
+     if (progressListener != nullptr) {
+@@ -241,6 +269,15 @@ Java_win_fantest_localwhisper_WhisperNative_transcribe(
+     }
+ 
+     const int rc = whisper_full(engine->ctx, params, samples, sampleCount);
++    const auto inferenceFinished = std::chrono::steady_clock::now();
++    const auto inferenceMs = std::chrono::duration_cast<std::chrono::milliseconds>(
++            inferenceFinished - inferenceStarted).count();
++    const double realtime = inferenceMs > 0
++            ? static_cast<double>(seconds) * 1000.0 / static_cast<double>(inferenceMs)
++            : 0.0;
++    LOGI("transcribe done profile=%s rc=%d elapsed_ms=%lld speed=%.2fx",
++         performance.c_str(), rc, static_cast<long long>(inferenceMs), realtime);
++
+     if (callbackState.listener != nullptr) {
+         env->DeleteGlobalRef(callbackState.listener);
+         callbackState.listener = nullptr;
+diff --git a/app/src/main/java/win/fantest/localwhisper/AppPrefs.java b/app/src/main/java/win/fantest/localwhisper/AppPrefs.java
+index bb68427..041cdef 100644
+--- a/app/src/main/java/win/fantest/localwhisper/AppPrefs.java
++++ b/app/src/main/java/win/fantest/localwhisper/AppPrefs.java
+@@ -13,11 +13,16 @@ public final class AppPrefs {
+     private static final String KEY_DOWNLOAD_ID = "download_id";
+     private static final String KEY_DOWNLOAD_MODEL = "download_model";
+     private static final String KEY_OVERLAY_ENABLED = "overlay_enabled";
++    private static final String KEY_PERFORMANCE = "performance";
+ 
+     public static final String OUTPUT_ORIGINAL = "original";
+     public static final String OUTPUT_ENGLISH = "english";
+     public static final String OUTPUT_BOTH = "both";
+ 
++    public static final String PERFORMANCE_FAST = "fast";
++    public static final String PERFORMANCE_BALANCED = "balanced";
++    public static final String PERFORMANCE_ACCURATE = "accurate";
++
+     private final SharedPreferences prefs;
+ 
+     public AppPrefs(Context context) {
+@@ -42,6 +47,13 @@ public final class AppPrefs {
+     public boolean overlayEnabled() { return prefs.getBoolean(KEY_OVERLAY_ENABLED, false); }
+     public void setOverlayEnabled(boolean value) { prefs.edit().putBoolean(KEY_OVERLAY_ENABLED, value).apply(); }
+ 
++    public String performanceProfile() {
++        return prefs.getString(KEY_PERFORMANCE, PERFORMANCE_FAST);
++    }
++    public void setPerformanceProfile(String value) {
++        prefs.edit().putString(KEY_PERFORMANCE, value).apply();
++    }
++
+     public long downloadId() { return prefs.getLong(KEY_DOWNLOAD_ID, -1L); }
+     public String downloadModel() { return prefs.getString(KEY_DOWNLOAD_MODEL, ""); }
+     public void setDownload(long id, String model) {
+diff --git a/app/src/main/java/win/fantest/localwhisper/MainActivity.java b/app/src/main/java/win/fantest/localwhisper/MainActivity.java
+index ca6606f..e12a001 100644
+--- a/app/src/main/java/win/fantest/localwhisper/MainActivity.java
++++ b/app/src/main/java/win/fantest/localwhisper/MainActivity.java
+@@ -210,6 +210,11 @@ public final class MainActivity extends Activity {
+     private void bindPrefs() {
+         bindingUi = true;
+         ui.modelSpinner.setSelection(ModelCatalog.FAST.equals(prefs.model()) ? 1 : 0);
++        String performance = prefs.performanceProfile();
++        ui.performanceSpinner.setSelection(
++                AppPrefs.PERFORMANCE_BALANCED.equals(performance) ? 1
++                        : (AppPrefs.PERFORMANCE_ACCURATE.equals(performance) ? 2 : 0)
++        );
+         ui.languageSpinner.setSelection("ar".equals(prefs.language()) ? 1 : ("en".equals(prefs.language()) ? 2 : 0));
+         ui.outputSpinner.setSelection(AppPrefs.OUTPUT_ENGLISH.equals(prefs.outputMode()) ? 1 : (AppPrefs.OUTPUT_BOTH.equals(prefs.outputMode()) ? 2 : 0));
+         ui.timestampsSwitch.setChecked(prefs.timestamps());
+@@ -221,6 +226,11 @@ public final class MainActivity extends Activity {
+ 
+     private void savePrefs() {
+         prefs.setModel(ui.modelSpinner.getSelectedItemPosition() == 1 ? ModelCatalog.FAST : ModelCatalog.QUALITY);
++        int pp = ui.performanceSpinner.getSelectedItemPosition();
++        prefs.setPerformanceProfile(
++                pp == 1 ? AppPrefs.PERFORMANCE_BALANCED
++                        : (pp == 2 ? AppPrefs.PERFORMANCE_ACCURATE : AppPrefs.PERFORMANCE_FAST)
++        );
+         int lp = ui.languageSpinner.getSelectedItemPosition();
+         prefs.setLanguage(lp == 1 ? "ar" : (lp == 2 ? "en" : "auto"));
+         int op = ui.outputSpinner.getSelectedItemPosition();
+diff --git a/app/src/main/java/win/fantest/localwhisper/MainUi.java b/app/src/main/java/win/fantest/localwhisper/MainUi.java
+index f784146..82dd554 100644
+--- a/app/src/main/java/win/fantest/localwhisper/MainUi.java
++++ b/app/src/main/java/win/fantest/localwhisper/MainUi.java
+@@ -30,6 +30,7 @@ public final class MainUi {
+ 
+     public final ScrollView root;
+     public final Spinner modelSpinner;
++    public final Spinner performanceSpinner;
+     public final Spinner languageSpinner;
+     public final Spinner outputSpinner;
+     public final Switch timestampsSwitch;
+@@ -168,6 +169,21 @@ public final class MainUi {
+         content.addView(settingsTitle, topLp(16));
+ 
+         settingsAnchor = card(dp(14));
++
++        performanceSpinner = spinner(new String[]{
++                "Fast · Large v3 Turbo optimized",
++                "Balanced · difficult speech",
++                "Maximum accuracy · beam search"
++        });
++        LinearLayout performanceTile = selectorTile("⚡", "Performance", performanceSpinner);
++        settingsAnchor.addView(performanceTile, new LinearLayout.LayoutParams(-1, -2));
++        View performanceDivider = divider();
++        LinearLayout.LayoutParams performanceDividerLp = new LinearLayout.LayoutParams(-1, dp(1));
++        performanceDividerLp.topMargin = dp(8);
++        performanceDividerLp.bottomMargin = dp(8);
++        performanceDivider.setLayoutParams(performanceDividerLp);
++        settingsAnchor.addView(performanceDivider);
++
+         languageSpinner = spinner(new String[]{"Auto detect", "Arabic", "English"});
+         outputSpinner = spinner(new String[]{"Original language", "English translation", "Original + English"});
+         LinearLayout selectorTiles = horizontal();
+diff --git a/app/src/main/java/win/fantest/localwhisper/TranscriptionService.java b/app/src/main/java/win/fantest/localwhisper/TranscriptionService.java
+index ec49abb..a3a81b5 100644
+--- a/app/src/main/java/win/fantest/localwhisper/TranscriptionService.java
++++ b/app/src/main/java/win/fantest/localwhisper/TranscriptionService.java
+@@ -10,6 +10,7 @@ import android.os.Build;
+ import android.os.IBinder;
+ 
+ import java.io.File;
++import java.util.Locale;
+ import java.util.concurrent.ExecutorService;
+ import java.util.concurrent.Executors;
+ import java.util.concurrent.atomic.AtomicBoolean;
+@@ -28,6 +29,12 @@ public final class TranscriptionService extends Service {
+     private static final String CHANNEL_ID = "transcription";
+     private static final int NOTIFICATION_ID = 4101;
+ 
++    // Keep the heavy Whisper model resident while the app process stays alive.
++    // Sharing several voice notes no longer reloads ~547 MB of model weights each time.
++    private static final Object ENGINE_LOCK = new Object();
++    private static long cachedEngine;
++    private static String cachedModelPath = "";
++
+     private ExecutorService executor;
+     private final AtomicBoolean draining = new AtomicBoolean(false);
+     private TranscriptionStateStore liveState;
+@@ -77,7 +84,7 @@ public final class TranscriptionService extends Service {
+         }
+         report(firstPending, "Loading Whisper model", -1, "", db.pendingCount(), true);
+ 
+-        long engine = WhisperNative.create(model.getAbsolutePath());
++        long engine = acquireEngine(model);
+         if (engine == 0L) {
+             failAllPending(db, "Could not load Whisper model");
+             notifyChanged();
+@@ -93,30 +100,33 @@ public final class TranscriptionService extends Service {
+ 
+                 File audio = new File(job.audioPath);
+                 long started = System.currentTimeMillis();
++                long audioDurationMs = 0L;
+                 try {
+                     AudioDecoder.DecodedAudio decoded = AudioDecoder.decode(audio);
++                    audioDurationMs = decoded.durationMs;
+                     report(job, "Preparing transcription", -1, "", remaining, true);
+ 
+                     String language = prefs.language();
+                     boolean timestamps = prefs.timestamps();
+                     String mode = prefs.outputMode();
++                    String performance = prefs.performanceProfile();
+                     String result;
+                     String detected;
+ 
+                     if (AppPrefs.OUTPUT_ENGLISH.equals(mode)) {
+                         ProgressEmitter emitter = new ProgressEmitter(job, "Translating to English", 0, 1, remaining);
+-                        result = WhisperNative.transcribe(engine, decoded.samples, language, true, timestamps, emitter);
++                        result = WhisperNative.transcribe(engine, decoded.samples, language, true, timestamps, performance, emitter);
+                         detected = WhisperNative.detectedLanguage(engine);
+                     } else if (AppPrefs.OUTPUT_BOTH.equals(mode)) {
+                         ProgressEmitter originalEmitter = new ProgressEmitter(job, "Transcribing original", 0, 2, remaining);
+-                        String original = WhisperNative.transcribe(engine, decoded.samples, language, false, timestamps, originalEmitter);
++                        String original = WhisperNative.transcribe(engine, decoded.samples, language, false, timestamps, performance, originalEmitter);
+                         detected = WhisperNative.detectedLanguage(engine);
+                         ProgressEmitter englishEmitter = new ProgressEmitter(job, "Translating to English", 1, 2, remaining);
+-                        String english = WhisperNative.transcribe(engine, decoded.samples, language, true, timestamps, englishEmitter);
++                        String english = WhisperNative.transcribe(engine, decoded.samples, language, true, timestamps, performance, englishEmitter);
+                         result = "Original:\n" + original + "\n\nEnglish:\n" + english;
+                     } else {
+                         ProgressEmitter emitter = new ProgressEmitter(job, "Transcribing", 0, 1, remaining);
+-                        result = WhisperNative.transcribe(engine, decoded.samples, language, false, timestamps, emitter);
++                        result = WhisperNative.transcribe(engine, decoded.samples, language, false, timestamps, performance, emitter);
+                         detected = WhisperNative.detectedLanguage(engine);
+                     }
+ 
+@@ -137,15 +147,35 @@ public final class TranscriptionService extends Service {
+                 }
+ 
+                 long elapsed = Math.max(1L, System.currentTimeMillis() - started);
+-                updateNotification("Finished " + job.name + " · " + elapsed / 1000L + "s", 100, 100);
++                String speed = audioDurationMs > 0L
++                        ? String.format(Locale.US, " · %.2fx realtime", (double) audioDurationMs / (double) elapsed)
++                        : "";
++                updateNotification("Finished " + job.name + " · " + elapsed / 1000L + "s" + speed, 100, 100);
+                 notifyChanged();
+             }
+         } finally {
+-            WhisperNative.destroy(engine);
++            // Intentionally keep the native engine cached for the next shared note.
+             notifyChanged();
+         }
+     }
+ 
++    private static long acquireEngine(File model) {
++        String path = model.getAbsolutePath();
++        synchronized (ENGINE_LOCK) {
++            if (cachedEngine != 0L && path.equals(cachedModelPath)) {
++                return cachedEngine;
++            }
++            if (cachedEngine != 0L) {
++                WhisperNative.destroy(cachedEngine);
++                cachedEngine = 0L;
++                cachedModelPath = "";
++            }
++            cachedEngine = WhisperNative.create(path);
++            if (cachedEngine != 0L) cachedModelPath = path;
++            return cachedEngine;
++        }
++    }
++
+     private final class ProgressEmitter implements WhisperNative.ProgressListener {
+         private final TranscriptDb.Job job;
+         private final String stage;
+diff --git a/app/src/main/java/win/fantest/localwhisper/WhisperNative.java b/app/src/main/java/win/fantest/localwhisper/WhisperNative.java
+index d3ae823..4331cfd 100644
+--- a/app/src/main/java/win/fantest/localwhisper/WhisperNative.java
++++ b/app/src/main/java/win/fantest/localwhisper/WhisperNative.java
+@@ -19,6 +19,7 @@ public final class WhisperNative {
+             String language,
+             boolean translate,
+             boolean includeTimestamps,
++            String performanceProfile,
+             ProgressListener listener
+     );
+     public static native String detectedLanguage(long handle);
+diff --git a/tools/v021_contract_test.py b/tools/v021_contract_test.py
+index 8fff8a9..01edafe 100644
+--- a/tools/v021_contract_test.py
++++ b/tools/v021_contract_test.py
+@@ -29,5 +29,5 @@ require('@mipmap/ic_launcher' in manifest, 'manifest must use adaptive launcher
+ require('@mipmap/ic_launcher_round' in manifest, 'manifest round icon missing')
+ require((root/'app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml').exists(), 'adaptive launcher icon missing')
+ require((root/'app/src/main/res/drawable/ic_notification.xml').exists(), 'notification icon missing')
+-require(('versionCode = 5' in gradle or 'versionCode = 6' in gradle or 'versionCode = 7' in gradle), 'versionCode must preserve v0.2.1+ update lineage')
++require(('versionCode = 5' in gradle or 'versionCode = 6' in gradle or 'versionCode = 7' in gradle or 'versionCode = 8' in gradle), 'versionCode must preserve v0.2.1+ update lineage')
+ print('PASS v021_contract_test')
+diff --git a/tools/v022_visual_contract_test.py b/tools/v022_visual_contract_test.py
+index c16b8d8..5ab9b91 100644
+--- a/tools/v022_visual_contract_test.py
++++ b/tools/v022_visual_contract_test.py
+@@ -5,7 +5,7 @@ main = (root/'app/src/main/java/win/fantest/localwhisper/MainActivity.java').rea
+ overlay = (root/'app/src/main/java/win/fantest/localwhisper/OverlayService.java').read_text()
+ build = (root/'app/build.gradle.kts').read_text()
+ checks = {
+-    'v022+ update lineage': ('versionCode = 6' in build or 'versionCode = 7' in build),
++    'v022+ update lineage': ('versionCode = 6' in build or 'versionCode = 7' in build or 'versionCode = 8' in build),
+     'compact persistent path': 'Download/LocalWhisper/models/' in ui,
+     'model installed chip': 'modelStateChip' in ui,
+     'header settings shortcut': 'settingsShortcut' in ui,
+diff --git a/tools/v023_visual_contract_test.py b/tools/v023_visual_contract_test.py
+index e9b13fe..6bfdc44 100644
+--- a/tools/v023_visual_contract_test.py
++++ b/tools/v023_visual_contract_test.py
+@@ -6,7 +6,10 @@ overlay = (root/'app/src/main/java/win/fantest/localwhisper/OverlayService.java'
+ build = (root/'app/build.gradle.kts').read_text()
+ 
+ checks = {
+-    'v023 version': 'versionCode = 7' in build and 'versionName = "0.2.3"' in build,
++    'v023+ version lineage': (
++        ('versionCode = 7' in build and 'versionName = "0.2.3"' in build)
++        or ('versionCode = 8' in build and 'versionName = "0.2.4"' in build)
++    ),
+     'safe area retained': 'setOnApplyWindowInsetsListener' in ui,
+     'persistent storage row': 'Persistent storage · Download/LocalWhisper/models/' in ui,
+     'developer backup block hidden': 'backupNote.setVisibility(View.GONE)' in ui,
+diff --git a/tools/v024_performance_contract_test.py b/tools/v024_performance_contract_test.py
+new file mode 100644
+index 0000000..87bfaf6
+--- /dev/null
++++ b/tools/v024_performance_contract_test.py
+@@ -0,0 +1,33 @@
++from pathlib import Path
++root = Path(__file__).resolve().parents[1]
++def txt(rel): return (root / rel).read_text()
++
++build = txt('app/build.gradle.kts')
++cmake = txt('app/src/main/cpp/CMakeLists.txt')
++native = txt('app/src/main/cpp/native-lib.cpp')
++prefs = txt('app/src/main/java/win/fantest/localwhisper/AppPrefs.java')
++ui = txt('app/src/main/java/win/fantest/localwhisper/MainUi.java')
++main = txt('app/src/main/java/win/fantest/localwhisper/MainActivity.java')
++service = txt('app/src/main/java/win/fantest/localwhisper/TranscriptionService.java')
++jni = txt('app/src/main/java/win/fantest/localwhisper/WhisperNative.java')
++
++checks = {
++    'v024 version': 'versionCode = 8' in build and 'versionName = "0.2.4"' in build,
++    'KleidiAI enabled in CMake': 'GGML_CPU_KLEIDIAI ON' in cmake,
++    'KleidiAI enabled in Gradle': '"-DGGML_CPU_KLEIDIAI=ON"' in build,
++    'fast default preference': 'PERFORMANCE_FAST' in prefs and 'prefs.getString(KEY_PERFORMANCE, PERFORMANCE_FAST)' in prefs,
++    'performance selector': 'performanceSpinner' in ui and 'Fast · Large v3 Turbo optimized' in ui,
++    'performance persisted': 'setPerformanceProfile' in main and 'performanceProfile()' in service,
++    'JNI performance profile': 'String performanceProfile' in jni and 'jstring performanceProfile' in native,
++    'fast greedy': 'WHISPER_SAMPLING_GREEDY' in native and 'params.greedy.best_of = 1' in native,
++    'balanced small beam': 'seconds <= 20.0f ? 3 : 2' in native,
++    'accurate legacy beam': 'seconds <= 20.0f ? 8 : 5' in native,
++    'thread tuning': 'desiredThreads' in native and 'std::min(8u, std::max(2u, desiredThreads))' in native,
++    'native timing': 'elapsed_ms=' in native and 'speed=%.2fx' in native,
++    'resident engine cache': 'cachedEngine' in service and 'acquireEngine(model)' in service,
++    'performance telemetry': 'x realtime' in service,
++}
++failed = [name for name, ok in checks.items() if not ok]
++if failed:
++    raise SystemExit('FAIL: ' + ', '.join(failed))
++print('PASS: v0.2.4 performance contract')
