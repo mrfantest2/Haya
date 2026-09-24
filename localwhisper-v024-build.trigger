@@ -1,2 +1,2 @@
-LocalWhisper v0.2.4 performance build trigger
-retry: 2
+LocalWhisper v0.2.4 speed + audio library build trigger
+retry: 3
