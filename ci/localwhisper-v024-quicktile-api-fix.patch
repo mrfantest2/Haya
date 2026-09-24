@@ -1,0 +1,43 @@
+diff --git a/app/src/main/java/win/fantest/localwhisper/MainActivity.java b/app/src/main/java/win/fantest/localwhisper/MainActivity.java
+index 4c87516b32215613a366581c6bcebfde2c183b90..248000da1be47510a5c79650889e5845b2e519ed 100644
+--- a/app/src/main/java/win/fantest/localwhisper/MainActivity.java
++++ b/app/src/main/java/win/fantest/localwhisper/MainActivity.java
+@@ -3,6 +3,7 @@ package win.fantest.localwhisper;
+ import android.Manifest;
+ import android.app.Activity;
+ import android.app.AlertDialog;
++import android.app.StatusBarManager;
+ import android.content.BroadcastReceiver;
+ import android.content.ClipData;
+ import android.content.ClipboardManager;
+@@ -20,7 +21,6 @@ import android.os.Bundle;
+ import android.os.Handler;
+ import android.os.Looper;
+ import android.provider.Settings;
+-import android.service.quicksettings.TileService;
+ import android.text.Editable;
+ import android.text.TextWatcher;
+ import android.view.View;
+@@ -761,14 +761,18 @@ public final class MainActivity extends Activity {
+ 
+     private void requestQuickTile() {
+         if (Build.VERSION.SDK_INT >= 33) {
+-            TileService.requestAddTileService(
+-                    this,
++            StatusBarManager statusBar = getSystemService(StatusBarManager.class);
++            if (statusBar == null) {
++                toast("Open Quick Settings edit and add Local Whisper");
++                return;
++            }
++            statusBar.requestAddTileService(
+                     new ComponentName(this, QuickTranscribeTileService.class),
+                     "Transcribe latest WhatsApp",
+                     Icon.createWithResource(this, R.drawable.ic_notification),
+                     getMainExecutor(),
+-                    result -> runOnUiThread(() -> toast(result == TileService.TILE_ADD_REQUEST_RESULT_TILE_ADDED
+-                            || result == TileService.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED
++                    result -> runOnUiThread(() -> toast(result == StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED
++                            || result == StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED
+                             ? "Quick tile ready"
+                             : "Open Quick Settings edit and add Local Whisper"))
+             );
