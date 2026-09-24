@@ -10,6 +10,7 @@ on:
       - ci/localwhisper-v024-consolidated01.b64
       - ci/localwhisper-v024-consolidated02.b64
       - ci/localwhisper-v024-consolidated03.b64
+      - ci/localwhisper-v024-quicktile-api-fix.patch
       - .github/workflows/localwhisper-v024-ci.yml
   workflow_dispatch:
 
@@ -95,6 +96,8 @@ jobs:
           echo '47f95493fdb9496f9c96e7d142fbd620749a77920b6270e9c8c2a67c512c77f8  /tmp/v024.patch' | sha256sum -c -
           cd "$PROJECT"
           patch -p1 < /tmp/v024.patch
+          echo '8b424d2e3063fc02b46c087d9dcb7de4fc11582a833fb02867df603e299b127d  '"$GITHUB_WORKSPACE"'/ci/localwhisper-v024-quicktile-api-fix.patch' | sha256sum -c -
+          patch -p1 < "$GITHUB_WORKSPACE/ci/localwhisper-v024-quicktile-api-fix.patch"
 
       - name: Verify exact v0.2.4 speed and audio-library source
         shell: bash
@@ -107,7 +110,7 @@ jobs:
           a73d67278af975c358f8738762390c27d5c8154a4bec4dc111bfd89fd96410e5  app/src/main/cpp/CMakeLists.txt
           056b1602b8f5c24adec039d939abaf13a7e04bd5a9ab25d4a204a63e26780bfb  app/src/main/cpp/native-lib.cpp
           8c2bf8f733ca20a43e5c5a8d0f5fd204892d428af7cc2186f8e2cfab0e7c9b83  app/src/main/java/win/fantest/localwhisper/AppPrefs.java
-          b7593cbc7e1810f3a504cc2fdc7bccaedd48586e52f10c84a48d59eb951d985f  app/src/main/java/win/fantest/localwhisper/MainActivity.java
+          d5cd0004df6742b6dd838d632ae7b4f17cdb46154537798e4fcc4befa85a139e  app/src/main/java/win/fantest/localwhisper/MainActivity.java
           8532804ab0e71d599cee5f3077339520f542ee7f802ade4a276604bb4e1eb2f7  app/src/main/java/win/fantest/localwhisper/MainUi.java
           2c16012e77e383cf1b363ab7dae5717e0475976ef0b1855e66f5b89a27fde9ac  app/src/main/java/win/fantest/localwhisper/QuickTranscribeTileService.java
           9eda2ef863dbb9c2b13f79b77119119b7d6b361912d76a2c225c0cd30c61eb48  app/src/main/java/win/fantest/localwhisper/ShareImporter.java
