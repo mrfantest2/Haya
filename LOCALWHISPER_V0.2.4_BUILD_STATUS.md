@@ -9,7 +9,7 @@
 - Successful CI run: `35945572605`
 - Successful CI head: `2968684936bbc16dafc3482c4659401adb6a4a47`
 - GitHub artifact ID: `10787010452`
-- Artifact digest: `sha256:a01f52186fddbb536ac2c25192d4023f9830ef2c97e9b8edc14a48f6e1bc4ca1`
+- Artifact digest: `sha256:a01f52186fddbb536ac2c25192d4023f9830ef2c97e9b8edc14a48f6e1bc4ca1`\n- Google Drive CI bundle: `https://drive.google.com/file/d/1hSqTwysdbG8fto6_4meX45W3R0foEXp2/view`
 
 ## Verified unsigned APK
 File: `LocalWhisper-v0.2.4-unsigned-aligned.apk`
