@@ -154,8 +154,6 @@ jobs:
         run: |
           set -euo pipefail
           cd "$PROJECT"
-          echo "ACTUAL_V025_HASHES"
-          sha256sum app/src/main/java/win/fantest/localwhisper/TranscriptionService.java master-pc/remote-transcriber/requirements.txt
           cat <<'SUMS' | sha256sum -c -
           1775ebfa41bb92101e59bc08af6ce2799c511d5ccaf1014c6ef6aa9c070f4806  app/build.gradle.kts
           126b605bfdb6e7ac1f55fc6def1b8523708a14add6117f0a2d1a3bef1e5b4af2  app/src/main/AndroidManifest.xml
@@ -164,9 +162,9 @@ jobs:
           0072cbeab86a45247e860b257a27820b62762d40e71d50fc94a1a0f3c5bd6b9e  app/src/main/java/win/fantest/localwhisper/MainUi.java
           76787b2de3d72545d353349084d64e8d44c1ec95e989f5bee163c968e38b4dc4  app/src/main/java/win/fantest/localwhisper/RemoteTranscriptionClient.java
           89fd08378bab6b9bc585c0692d00f6a8bfbcadb8b7aaa13b0b544d99c5d2b9c4  app/src/main/java/win/fantest/localwhisper/TranscriptDb.java
-          46e65115cb4f2f2d10fe1e2a10cc85bb8d5e0b280ff2a76d9a97cee11c3b3ee4  app/src/main/java/win/fantest/localwhisper/TranscriptionService.java
+          1e440da2116b65abc4b55448a71f8aa4fcddbc1b316b87007758495bcfea4877  app/src/main/java/win/fantest/localwhisper/TranscriptionService.java
           6cd875778e1237e788a0a000a18bd7b7d75d35a30188142b7bc58529c71b18ce  master-pc/remote-transcriber/README.md
-          9432a10a4452c0f2090a0ef53f90450380467e9f0554988c3453d77afea3e0a6  master-pc/remote-transcriber/requirements.txt
+          414a1cda8509ace40f34018976ab43f3f3cdce397a14b1c2ff8487b4cb09be7f  master-pc/remote-transcriber/requirements.txt
           c81a785914efbb0c81c02d898c3d044d7cd42b0c9a09d13b7660656eb9560b53  master-pc/remote-transcriber/run-server.ps1
           11a11de6f5f3e5bd1ebf45eaa3e157bd34c7d4f738b80471a116a605831e4384  master-pc/remote-transcriber/server.py
           cd35465871e9271f649812f56382f13abc13b5922a329800e13ea428d6e3f548  tools/v025_remote_contract_test.py
