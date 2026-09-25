@@ -83,14 +83,21 @@ Known protected copies on MASTER-PC:
 All future update-compatible APKs for the currently installed v0.2.3 build must use this identity.
 
 ## Current deployment state
-The unsigned v0.2.4 release is fully built and verified. MASTER-PC / Remote Desktop Commander is currently offline, so signing with the protected key and S25 update-install have not yet been performed.
+MASTER-PC is online. The exact successful-CI artifact was downloaded and checksum-verified, then signed with the active v0.2.3+ key.
 
-When MASTER-PC reconnects:
-1. fetch the exact unsigned APK above;
-2. sign it with the active v0.2.3+ key;
-3. verify v2/v3 signing and the exact certificate fingerprint;
-4. `adb install -r -g` over v0.2.3 — do not uninstall;
-5. launch on S25 Ultra;
-6. verify DB upgrade/history retention/search/pagination/play/re-transcribe/delete;
-7. add/test Quick Settings tile against a fresh WhatsApp voice note;
-8. benchmark Large v3 Turbo Fast profile against v0.2.3.
+Verified final signed APK:
+- Path on MASTER-PC: `C:\\LocalWhisper\\deploy-v024-final\\LocalWhisper-v0.2.4-signed.apk`
+- SHA-256: `B8DB92E692AD7040D7FD50EBA061D0D0158254AB4DD99674F01CEB4EF2D0A973`
+- APK Signature Scheme v2: verified
+- APK Signature Scheme v3: verified
+- signer certificate SHA-256: `B5:35:7F:95:0D:4E:D4:3E:A3:13:5A:EE:DC:DE:FB:57:60:E5:76:80:21:D0:B9:B4:70:A6:AD:2A:95:DD:B4:DA`
+- final APK manifest includes `READ_MEDIA_AUDIO` and `QuickTranscribeTileService`.
+
+S25 Ultra is not currently present in MASTER-PC's ADB device list, so update-install and on-device regression remain pending.
+
+Next:
+1. reconnect S25 to MASTER-PC ADB;
+2. `adb install -r -g` the exact signed APK above — do not uninstall;
+3. launch and verify DB upgrade/history retention/search/pagination/play/re-transcribe/delete;
+4. add/test the `Transcribe latest WhatsApp` Quick Settings tile against a fresh WhatsApp voice note;
+5. benchmark Large v3 Turbo Fast profile against v0.2.3.
