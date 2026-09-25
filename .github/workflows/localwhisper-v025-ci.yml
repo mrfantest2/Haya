@@ -1,0 +1,286 @@
+name: LocalWhisper v0.2.5 Remote-First Build
+
+on:
+  push:
+    branches:
+      - build/localwhisper-v0.2.5-remote
+    paths:
+      - localwhisper-v025-build.trigger
+      - ci/localwhisper-v024-consolidated00.b64
+      - ci/localwhisper-v024-consolidated01.b64
+      - ci/localwhisper-v024-consolidated02.b64
+      - ci/localwhisper-v024-consolidated03.b64
+      - ci/localwhisper-v024-quicktile-api-fix.patch
+      - ci/localwhisper-v025-remote.patch
+      - .github/workflows/localwhisper-v025-ci.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout build branch
+        uses: actions/checkout@v4
+
+      - name: Reconstruct canonical v0.2.2 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat ci/localwhisper-v021/source00.b64 ci/localwhisper-v021/source01.b64 ci/localwhisper-v021/source02.b64 ci/localwhisper-v021/source03.b64 ci/localwhisper-v021/source04.b64 ci/localwhisper-v021/source05.b64 > /tmp/source.tar.xz.b64
+          test "$(wc -c < /tmp/source.tar.xz.b64)" -eq 58860
+          base64 -d /tmp/source.tar.xz.b64 > /tmp/source.tar.xz
+          echo '99b7246060d76b45d2fcbde2567344b204e2e5ead121a88f2cd13b836be824da  /tmp/source.tar.xz' | sha256sum -c -
+          rm -rf "$GITHUB_WORKSPACE/localwhisper-v024"
+          mkdir -p "$GITHUB_WORKSPACE/localwhisper-v024"
+          tar -xJf /tmp/source.tar.xz -C "$GITHUB_WORKSPACE/localwhisper-v024"
+          base64 -d ci/localwhisper-v022.patch.xz.b64 > /tmp/v022.patch.xz
+          xz -dc /tmp/v022.patch.xz > /tmp/v022.patch
+          cd "$GITHUB_WORKSPACE/localwhisper-v024"
+          patch -p1 < /tmp/v022.patch
+          sed -i 's/row\.setMinHeight(dp(52));/row.setMinimumHeight(dp(52));/' app/src/main/java/win/fantest/localwhisper/MainUi.java
+          PROJECT="$GITHUB_WORKSPACE/localwhisper-v024"
+          echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
+
+      - name: Verify reconstructed v0.2.2 baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$PROJECT/settings.gradle.kts"
+          test -f "$PROJECT/app/src/main/cpp/native-lib.cpp"
+          grep -Fq 'versionCode = 6' "$PROJECT/app/build.gradle.kts"
+          grep -Fq 'versionName = "0.2.2"' "$PROJECT/app/build.gradle.kts"
+          grep -Fq 'modelStateChip' "$PROJECT/app/src/main/java/win/fantest/localwhisper/MainUi.java"
+          grep -Fq 'historyExpanded ? 20 : 3' "$PROJECT/app/src/main/java/win/fantest/localwhisper/MainActivity.java"
+
+      - name: Apply exact v0.2.3 source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '0f9adf9daa861ab410445a73f7a6c2c32f6ff046955be4538d3b7962aa25f1a4  ci/localwhisper-v023.patch' | sha256sum -c -
+          cd "$PROJECT"
+          patch -p1 < "$GITHUB_WORKSPACE/ci/localwhisper-v023.patch"
+
+      - name: Verify exact tested v0.2.3 changed files
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT"
+          cat <<'SUMS' | sha256sum -c -
+          6f3876f22118d18beeba6593ccce7e91baf79c1cce93bb93e9cceb8f59c7fc9b  app/build.gradle.kts
+          df88e1c2d06c252dd99443fb94c92003910bc71c80e7b9c1da2a63b4c1b2f203  app/src/main/java/win/fantest/localwhisper/MainActivity.java
+          51e7c624f1ef5229959cf58a8d431eacea4778609c32ee2feec3c4befa076734  app/src/main/java/win/fantest/localwhisper/MainUi.java
+          0813dffab415b6c5506ebcf9e00545ed3f6a1680ab8633509a7018cf2c52af89  app/src/main/java/win/fantest/localwhisper/OverlayService.java
+          d5b975d9624583e91a7eb0c6513f96bb343636b5e1a8d5ead113cd6b96d2b38e  tools/v021_contract_test.py
+          b8bfb26cbc2c102ac0f23a9188ccf497d7fb8e643256c2e142d6fe6f27a37a8b  tools/v022_visual_contract_test.py
+          401b18d24e13a4ef8519b3d37ec55eb79dae6c97d5ed22204ef5cf93856260e1  tools/v023_visual_contract_test.py
+          SUMS
+          grep -Fq 'versionCode = 7' app/build.gradle.kts
+          grep -Fq 'versionName = "0.2.3"' app/build.gradle.kts
+          grep -Fq 'Persistent storage · Download/LocalWhisper/models/' app/src/main/java/win/fantest/localwhisper/MainUi.java
+          grep -Fq 'historyExpanded ? 20 : 2' app/src/main/java/win/fantest/localwhisper/MainActivity.java
+          grep -Fq 'Preparing voice note…' app/src/main/java/win/fantest/localwhisper/OverlayService.java
+
+
+      - name: Apply consolidated v0.2.4 speed and audio-library patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat ci/localwhisper-v024-consolidated00.b64 ci/localwhisper-v024-consolidated01.b64 ci/localwhisper-v024-consolidated02.b64 ci/localwhisper-v024-consolidated03.b64 > /tmp/v024.patch.xz.b64
+          test "$(wc -c < /tmp/v024.patch.xz.b64)" -eq 21244
+          base64 -d /tmp/v024.patch.xz.b64 > /tmp/v024.patch.xz
+          echo '92b9e6e53f938a649b38c0ef44b84418c4788ce438362a328e6f6cb8bc97e077  /tmp/v024.patch.xz' | sha256sum -c -
+          xz -dc /tmp/v024.patch.xz > /tmp/v024.patch
+          echo '47f95493fdb9496f9c96e7d142fbd620749a77920b6270e9c8c2a67c512c77f8  /tmp/v024.patch' | sha256sum -c -
+          cd "$PROJECT"
+          patch -p1 < /tmp/v024.patch
+          echo '8b424d2e3063fc02b46c087d9dcb7de4fc11582a833fb02867df603e299b127d  '"$GITHUB_WORKSPACE"'/ci/localwhisper-v024-quicktile-api-fix.patch' | sha256sum -c -
+          patch -p1 < "$GITHUB_WORKSPACE/ci/localwhisper-v024-quicktile-api-fix.patch"
+
+      - name: Verify exact v0.2.4 speed and audio-library source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT"
+          cat <<'SUMS' | sha256sum -c -
+          bfc48a856e20b51d02c3582367d56c07eeede4f608cdc030b2d989331a21e15e  app/build.gradle.kts
+          59b3029070af975c358f8738762390c27d5c8154a4bec4dc111bfd89fd96410e5  app/src/main/AndroidManifest.xml
+          a73d67278af975c358f8738762390c27d5c8154a4bec4dc111bfd89fd96410e5  app/src/main/cpp/CMakeLists.txt
+          056b1602b8f5c24adec039d939abaf13a7e04bd5a9ab25d4a204a63e26780bfb  app/src/main/cpp/native-lib.cpp
+          8c2bf8f733ca20a43e5c5a8d0f5fd204892d428af7cc2186f8e2cfab0e7c9b83  app/src/main/java/win/fantest/localwhisper/AppPrefs.java
+          d5cd0004df6742b6dd838d632ae7b4f17cdb46154537798e4fcc4befa85a139e  app/src/main/java/win/fantest/localwhisper/MainActivity.java
+          8532804ab0e71d599cee5f3077339520f542ee7f802ade4a276604bb4e1eb2f7  app/src/main/java/win/fantest/localwhisper/MainUi.java
+          2c16012e77e383cf1b363ab7dae5717e0475976ef0b1855e66f5b89a27fde9ac  app/src/main/java/win/fantest/localwhisper/QuickTranscribeTileService.java
+          9eda2ef863dbb9c2b13f79b77119119b7d6b361912d76a2c225c0cd30c61eb48  app/src/main/java/win/fantest/localwhisper/ShareImporter.java
+          da980188b9198617ba359e8c71ce6cdabb2743ce9834a1d5d150b389a0280107  app/src/main/java/win/fantest/localwhisper/TranscriptDb.java
+          6ede551d361e129ed293daf88bd35a3e93719ce8d8b676be3e9f865d0423627c  app/src/main/java/win/fantest/localwhisper/TranscriptionService.java
+          874cbddd1a05d39dc80da35524db0e1a61bb42a7773aa330dadbcdaa8b1e6a35  app/src/main/java/win/fantest/localwhisper/WhatsAppAudioFinder.java
+          2b2c9160b9b4ac9b580d59103dd1a854c1c42b8380a3823dd125b1632a843d3e  app/src/main/java/win/fantest/localwhisper/WhisperEngineCache.java
+          6c27222f1a9d2d272d9f3fe896e961f28522a44a26c6d990ee7a12d41318c778  app/src/main/java/win/fantest/localwhisper/WhisperNative.java
+          86d042cf409ea58771ba4569e0dfc0cadedea6ad6e48a17966e1dfc42b521102  tools/v021_contract_test.py
+          9716826e85cf0cf6bc6527f45c441fc7d3ba9401ec107c599d57e3f68225f98c  tools/v022_visual_contract_test.py
+          38f3b894f579185ac11e322c53283d1105fd491b30bd6fa186ca0b8600b5b993  tools/v023_visual_contract_test.py
+          6d2375e4b686ae9ecce69b2a6e9605870d60e338e59c21d3fb30f9178078c807  tools/v024_library_speed_contract_test.py
+          SUMS
+          grep -Fq 'versionCode = 8' app/build.gradle.kts
+          grep -Fq 'versionName = "0.2.4"' app/build.gradle.kts
+          grep -Fq 'GGML_CPU_KLEIDIAI ON' app/src/main/cpp/CMakeLists.txt
+          grep -Fq 'WHISPER_SAMPLING_GREEDY' app/src/main/cpp/native-lib.cpp
+          grep -Fq 'QuickTranscribeTileService' app/src/main/AndroidManifest.xml
+          grep -Fq 'performance_profile' app/src/main/java/win/fantest/localwhisper/TranscriptDb.java
+          grep -Fq 'showRetranscribePicker' app/src/main/java/win/fantest/localwhisper/MainActivity.java
+
+
+      - name: Verify v0.2.4 baseline contract before remote-first delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT"
+          python3 tools/v024_library_speed_contract_test.py
+
+      - name: Apply exact v0.2.5 remote-first patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '81b36df1a6b5408b86b8eb36400dffd027c786f5753ade5d06e00fc501b9b3cb  ci/localwhisper-v025-remote.patch' | sha256sum -c -
+          cd "$PROJECT"
+          patch -p1 < "$GITHUB_WORKSPACE/ci/localwhisper-v025-remote.patch"
+
+      - name: Verify exact v0.2.5 remote-first source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT"
+          cat <<'SUMS' | sha256sum -c -
+          160ad15ba63d6fd8b4247102f57a35d8cb358938ac12b5b21a38149a9ae267a8  app/build.gradle.kts
+          126b605bfdb6e7ac1f55fc6def1b8523708a14add6117f0a2d1a3bef1e5b4af2  app/src/main/AndroidManifest.xml
+          03300d479318ab711071fc1010136049c6617f64dce8206b9d1c49f48742f48f  app/src/main/java/win/fantest/localwhisper/AppPrefs.java
+          c6223036ba93a8a97fc6270a9ee878cb03f3f805dfe701fa945dd67887c087b1  app/src/main/java/win/fantest/localwhisper/MainActivity.java
+          0072cbeab86a45247e860b257a27820b62762d40e71d50fc94a1a0f3c5bd6b9e  app/src/main/java/win/fantest/localwhisper/MainUi.java
+          76787b2de3d72545d353349084d64e8d44c1ec95e989f5bee163c968e38b4dc4  app/src/main/java/win/fantest/localwhisper/RemoteTranscriptionClient.java
+          89fd08378bab6b9bc585c0692d00f6a8bfbcadb8b7aaa13b0b544d99c5d2b9c4  app/src/main/java/win/fantest/localwhisper/TranscriptDb.java
+          46e65115cb4f2f2d10fe1e2a10cc85bb8d5e0b280ff2a76d9a97cee11c3b3ee4  app/src/main/java/win/fantest/localwhisper/TranscriptionService.java
+          6cd875778e1237e788a0a000a18bd7b7d75d35a30188142b7bc58529c71b18ce  master-pc/remote-transcriber/README.md
+          9432a10a4452c0f2090a0ef53f90450380467e9f0554988c3453d77afea3e0a6  master-pc/remote-transcriber/requirements.txt
+          c81a785914efbb0c81c02d898c3d044d7cd42b0c9a09d13b7660656eb9560b53  master-pc/remote-transcriber/run-server.ps1
+          11a11de6f5f3e5bd1ebf45eaa3e157bd34c7d4f738b80471a116a605831e4384  master-pc/remote-transcriber/server.py
+          cd35465871e9271f649812f56382f13abc13b5922a329800e13ea428d6e3f548  tools/v025_remote_contract_test.py
+          SUMS
+          grep -Fq 'versionCode = 9' app/build.gradle.kts
+          grep -Fq 'versionName = "0.2.5"' app/build.gradle.kts
+          grep -Fq 'getBoolean(KEY_REMOTE_FIRST, true)' app/src/main/java/win/fantest/localwhisper/AppPrefs.java
+          grep -Fq 'master-pc-1.tail46be8b.ts.net:8766' app/src/main/java/win/fantest/localwhisper/AppPrefs.java
+          grep -Fq 'RemoteTranscriptionClient.transcribe' app/src/main/java/win/fantest/localwhisper/TranscriptionService.java
+          grep -Fq 'Master PC unavailable · local fallback' app/src/main/java/win/fantest/localwhisper/TranscriptionService.java
+          grep -Fq 'DB_VERSION = 3' app/src/main/java/win/fantest/localwhisper/TranscriptDb.java
+          grep -Fq 'engine_source' app/src/main/java/win/fantest/localwhisper/TranscriptDb.java
+          grep -Fq 'faster_whisper' master-pc/remote-transcriber/server.py
+          python3 tools/v025_remote_contract_test.py
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Use runner Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT=/usr/local/lib/android/sdk
+          test -d "$SDK_ROOT"
+          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager | sort -V | tail -1)"
+          test -x "$SDKMANAGER"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
+          "$SDKMANAGER" --version
+
+      - name: Install Android native toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0' 'cmake;3.22.1' 'ndk;27.2.12479018'
+
+      - name: Pin NDK for hosted build
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          p = Path(os.environ['PROJECT']) / 'app/build.gradle.kts'
+          s = p.read_text()
+          needle = '    compileSdk = 35\n'
+          assert needle in s
+          if 'ndkVersion = ' not in s:
+              s = s.replace(needle, needle + '    ndkVersion = "27.2.12479018"\n', 1)
+          p.write_text(s)
+          PY
+
+      - name: Set up Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Run full v0.2.5 regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT"
+          rm -rf /tmp/lwtests && mkdir -p /tmp/lwtests
+          javac -d /tmp/lwtests app/src/main/java/win/fantest/localwhisper/DownloadProgressEstimator.java tools/DownloadProgressEstimatorTest.java
+          java -cp /tmp/lwtests DownloadProgressEstimatorTest
+          javac -d /tmp/lwtests app/src/main/java/win/fantest/localwhisper/ModelFileInstaller.java tools/ModelFileInstallerTest.java
+          java -cp /tmp/lwtests ModelFileInstallerTest
+          javac -d /tmp/lwtests app/src/main/java/win/fantest/localwhisper/ProgressMapper.java tools/ProgressMapperTest.java
+          java -cp /tmp/lwtests ProgressMapperTest
+          javac -d /tmp/lwtests app/src/main/java/win/fantest/localwhisper/Resampler.java tools/ResamplerSmokeTest.java
+          java -cp /tmp/lwtests ResamplerSmokeTest
+          javac -d /tmp/lwtests app/src/main/java/win/fantest/localwhisper/ResumableHttpDownloader.java tools/ResumableHttpDownloaderTest.java
+          java -cp /tmp/lwtests ResumableHttpDownloaderTest
+          python3 tools/source_contract_test.py
+          python3 tools/main_ui_contract_test.py
+          python3 tools/v021_contract_test.py
+          python3 tools/v022_visual_contract_test.py
+          python3 tools/v023_visual_contract_test.py
+          python3 tools/v025_remote_contract_test.py
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          ET.parse('app/src/main/AndroidManifest.xml')
+          print('PASS manifest XML')
+          PY
+
+      - name: Build unsigned arm64 release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT"
+          gradle --no-daemon clean assembleRelease --stacktrace
+
+      - name: Align and verify unsigned APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC="$PROJECT/app/build/outputs/apk/release/app-release-unsigned.apk"
+          test -s "$SRC"
+          mkdir -p artifacts
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -f -p 4 "$SRC" artifacts/LocalWhisper-v0.2.5-unsigned-aligned.apk
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -v 4 artifacts/LocalWhisper-v0.2.5-unsigned-aligned.apk >/dev/null
+          unzip -t artifacts/LocalWhisper-v0.2.5-unsigned-aligned.apk >/dev/null
+          unzip -l artifacts/LocalWhisper-v0.2.5-unsigned-aligned.apk | grep -Fq 'lib/arm64-v8a/liblocalwhisper.so'
+          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" artifacts/apksigner.jar
+          tar -cJf artifacts/LocalWhisper-v0.2.5-source.tar.xz -C "$PROJECT" .
+          sha256sum artifacts/LocalWhisper-v0.2.5-unsigned-aligned.apk artifacts/LocalWhisper-v0.2.5-source.tar.xz | tee artifacts/SHA256SUMS.txt
+
+      - name: Upload unsigned APK and exact source
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocalWhisper-v0.2.5-unsigned-current
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 3

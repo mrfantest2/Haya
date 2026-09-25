@@ -1,0 +1,1370 @@
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+index cb309b2..ee178bb 100644
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -11,8 +11,8 @@ android {
+         applicationId = "win.fantest.localwhisper"
+         minSdk = 26
+         targetSdk = 35
+-        versionCode = 8
+-        versionName = "0.2.4"
++        versionCode = 9
++        versionName = "0.2.5"
+ 
+         ndk {
+             abiFilters += listOf("arm64-v8a")
+diff --git a/app/src/main/AndroidManifest.xml b/app/src/main/AndroidManifest.xml
+index b6db132..5ccc67a 100644
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -12,6 +12,7 @@
+ 
+     <application
+         android:allowBackup="false"
++        android:usesCleartextTraffic="true"
+         android:icon="@mipmap/ic_launcher"
+         android:roundIcon="@mipmap/ic_launcher_round"
+         android:label="@string/app_name"
+diff --git a/app/src/main/java/win/fantest/localwhisper/AppPrefs.java b/app/src/main/java/win/fantest/localwhisper/AppPrefs.java
+index e0f3791..8368179 100644
+--- a/app/src/main/java/win/fantest/localwhisper/AppPrefs.java
++++ b/app/src/main/java/win/fantest/localwhisper/AppPrefs.java
+@@ -16,6 +16,9 @@ public final class AppPrefs {
+     private static final String KEY_PERFORMANCE = "performance";
+     private static final String KEY_LAST_QUICK_MEDIA = "last_quick_media";
+     private static final String KEY_LIBRARY_V2_MIGRATED = "library_v2_migrated";
++    private static final String KEY_REMOTE_FIRST = "remote_first";
++
++    public static final String REMOTE_BASE_URL = "http://master-pc-1.tail46be8b.ts.net:8766";
+ 
+     public static final String OUTPUT_ORIGINAL = "original";
+     public static final String OUTPUT_ENGLISH = "english";
+@@ -63,6 +66,9 @@ public final class AppPrefs {
+     public boolean overlayEnabled() { return prefs.getBoolean(KEY_OVERLAY_ENABLED, false); }
+     public void setOverlayEnabled(boolean value) { prefs.edit().putBoolean(KEY_OVERLAY_ENABLED, value).apply(); }
+ 
++    public boolean remoteFirst() { return prefs.getBoolean(KEY_REMOTE_FIRST, true); }
++    public void setRemoteFirst(boolean value) { prefs.edit().putBoolean(KEY_REMOTE_FIRST, value).apply(); }
++
+     public long downloadId() { return prefs.getLong(KEY_DOWNLOAD_ID, -1L); }
+     public String downloadModel() { return prefs.getString(KEY_DOWNLOAD_MODEL, ""); }
+     public void setDownload(long id, String model) {
+diff --git a/app/src/main/java/win/fantest/localwhisper/MainActivity.java b/app/src/main/java/win/fantest/localwhisper/MainActivity.java
+index 248000d..40a5eec 100644
+--- a/app/src/main/java/win/fantest/localwhisper/MainActivity.java
++++ b/app/src/main/java/win/fantest/localwhisper/MainActivity.java
+@@ -208,6 +208,12 @@ public final class MainActivity extends Activity {
+             }
+             @Override public void afterTextChanged(Editable s) {}
+         });
++        ui.remoteFirstSwitch.setOnCheckedChangeListener((button, checked) -> {
++            if (bindingUi) return;
++            prefs.setRemoteFirst(checked);
++            updateRemoteSummary();
++            refresh();
++        });
+         ui.overlaySwitch.setOnCheckedChangeListener((button, checked) -> {
+             if (bindingUi) return;
+             if (!checked) {
+@@ -236,10 +242,12 @@ public final class MainActivity extends Activity {
+         ui.languageSpinner.setSelection("ar".equals(prefs.language()) ? 1 : ("en".equals(prefs.language()) ? 2 : 0));
+         ui.outputSpinner.setSelection(AppPrefs.OUTPUT_ENGLISH.equals(prefs.outputMode()) ? 1 : (AppPrefs.OUTPUT_BOTH.equals(prefs.outputMode()) ? 2 : 0));
+         ui.performanceSpinner.setSelection(AppPrefs.PERFORMANCE_BALANCED.equals(prefs.performanceProfile()) ? 1 : (AppPrefs.PERFORMANCE_ACCURATE.equals(prefs.performanceProfile()) ? 2 : 0));
++        ui.remoteFirstSwitch.setChecked(prefs.remoteFirst());
+         ui.timestampsSwitch.setChecked(prefs.timestamps());
+         ui.keepAudioSwitch.setChecked(prefs.keepAudio());
+         ui.overlaySwitch.setChecked(prefs.overlayEnabled() && Settings.canDrawOverlays(this));
+         bindingUi = false;
++        updateRemoteSummary();
+         updateOverlaySummary();
+     }
+ 
+@@ -251,10 +259,19 @@ public final class MainActivity extends Activity {
+         prefs.setOutputMode(op == 1 ? AppPrefs.OUTPUT_ENGLISH : (op == 2 ? AppPrefs.OUTPUT_BOTH : AppPrefs.OUTPUT_ORIGINAL));
+         int dp = ui.performanceSpinner.getSelectedItemPosition();
+         prefs.setPerformanceProfile(dp == 1 ? AppPrefs.PERFORMANCE_BALANCED : (dp == 2 ? AppPrefs.PERFORMANCE_ACCURATE : AppPrefs.PERFORMANCE_FAST));
++        prefs.setRemoteFirst(ui.remoteFirstSwitch.isChecked());
+         prefs.setTimestamps(ui.timestampsSwitch.isChecked());
+         prefs.setKeepAudio(ui.keepAudioSwitch.isChecked());
+     }
+ 
++    private void updateRemoteSummary() {
++        boolean enabled = prefs.remoteFirst();
++        ui.remoteSummary.setText(enabled
++                ? "Enabled · Master PC RTX 2060 over Tailscale is tried first. Local Whisper is automatic fallback."
++                : "Disabled · transcription runs only on this phone.");
++        ui.remoteSummary.setTextColor(enabled ? MainUi.ACCENT_DARK : MainUi.MUTED);
++    }
++
+     private void updateOverlaySummary() {
+         boolean enabled = prefs.overlayEnabled() && Settings.canDrawOverlays(this);
+         ui.overlaySummary.setText(enabled
+@@ -473,8 +490,9 @@ public final class MainActivity extends Activity {
+             ui.status.setText("● " + live.stage + (live.progress >= 0 ? " " + live.progress + "%" : "") + " · Queue " + db.pendingCount());
+             ui.status.setTextColor(MainUi.ACCENT);
+         } else {
+-            ui.status.setText("● " + (installed ? "Model ready" : "Model not installed") + " · Queue " + db.pendingCount());
+-            ui.status.setTextColor(installed ? MainUi.ACCENT : MainUi.MUTED);
++            String engine = prefs.remoteFirst() ? "Master PC first" : (installed ? "On-device ready" : "Local model not installed");
++            ui.status.setText("● " + engine + " · Queue " + db.pendingCount());
++            ui.status.setTextColor(prefs.remoteFirst() || installed ? MainUi.ACCENT : MainUi.MUTED);
+         }
+         renderHistory();
+     }
+@@ -536,7 +554,7 @@ public final class MainActivity extends Activity {
+             String modelId = legacyModel ? "" : job.modelId;
+             String engineText = legacyModel
+                     ? "Legacy · model not recorded"
+-                    : shortModelTitle(modelId) + " · " + performanceLabel(job.performanceProfile);
++                    : ("master-pc".equals(job.engineSource) ? "Master PC · " : "On-device · ") + shortModelTitle(modelId) + " · " + performanceLabel(job.performanceProfile);
+             if (job.processingMs > 0) {
+                 engineText += " · " + formatDuration(job.processingMs) + " processing";
+                 if (job.durationMs > 0) {
+diff --git a/app/src/main/java/win/fantest/localwhisper/MainUi.java b/app/src/main/java/win/fantest/localwhisper/MainUi.java
+index a5b8076..88ef1f1 100644
+--- a/app/src/main/java/win/fantest/localwhisper/MainUi.java
++++ b/app/src/main/java/win/fantest/localwhisper/MainUi.java
+@@ -34,9 +34,11 @@ public final class MainUi {
+     public final Spinner languageSpinner;
+     public final Spinner outputSpinner;
+     public final Spinner performanceSpinner;
++    public final Switch remoteFirstSwitch;
+     public final Switch timestampsSwitch;
+     public final Switch keepAudioSwitch;
+     public final Switch overlaySwitch;
++    public final TextView remoteSummary;
+     public final TextView overlaySummary;
+     public final LinearLayout downloadCard;
+     public final TextView downloadTitle;
+@@ -88,7 +90,7 @@ public final class MainUi {
+         LinearLayout headerCopy = new LinearLayout(activity);
+         headerCopy.setOrientation(LinearLayout.VERTICAL);
+         TextView title = text("Local Whisper", 25, true);
+-        TextView subtitle = text("Private. On-device. Yours.", 11, false);
++        TextView subtitle = text("Private. Master PC + on-device fallback.", 11, false);
+         subtitle.setTextColor(MUTED);
+         headerCopy.addView(title);
+         headerCopy.addView(subtitle);
+@@ -104,7 +106,7 @@ public final class MainUi {
+         header.addView(headerActions);
+         content.addView(header);
+ 
+-        TextView intro = text("Share a WhatsApp voice note here. Transcription stays on this phone.", 12, false);
++        TextView intro = text("Voice notes use your Master PC over Tailscale by default, with local fallback.", 12, false);
+         intro.setTextColor(MUTED);
+         intro.setPadding(dp(49), dp(2), dp(4), dp(4));
+         content.addView(intro);
+@@ -202,9 +204,16 @@ public final class MainUi {
+         settingsDivider.setLayoutParams(settingsDividerLp);
+         settingsAnchor.addView(settingsDivider);
+ 
++        remoteFirstSwitch = toggle("☁  Master PC transcription first");
++        remoteSummary = text("Default · RTX 2060 Large v3 Turbo over encrypted Tailscale. Falls back on-device if unreachable.", 11, false);
++        remoteSummary.setTextColor(ACCENT_DARK);
++        remoteSummary.setPadding(dp(8), dp(2), dp(8), dp(5));
+         timestampsSwitch = toggle("◷  Include timestamps");
+         keepAudioSwitch = toggle("♪  Keep audio for Play / Re-transcribe");
+         overlaySwitch = toggle("▣  Stay in chat floating transcript");
++        settingsAnchor.addView(remoteFirstSwitch);
++        settingsAnchor.addView(remoteSummary);
++        settingsAnchor.addView(divider());
+         settingsAnchor.addView(timestampsSwitch);
+         settingsAnchor.addView(divider());
+         settingsAnchor.addView(keepAudioSwitch);
+@@ -238,7 +247,7 @@ public final class MainUi {
+         content.addView(recentTitle, topLp(8));
+ 
+         historySearch = new EditText(activity);
+-        historySearch.setHint("Search transcript, model or language");
++        historySearch.setHint("Search transcript, model, engine or language");
+         historySearch.setSingleLine(true);
+         historySearch.setTextSize(13);
+         historySearch.setPadding(dp(12), 0, dp(12), 0);
+diff --git a/app/src/main/java/win/fantest/localwhisper/RemoteTranscriptionClient.java b/app/src/main/java/win/fantest/localwhisper/RemoteTranscriptionClient.java
+new file mode 100644
+index 0000000..6a1134d
+--- /dev/null
++++ b/app/src/main/java/win/fantest/localwhisper/RemoteTranscriptionClient.java
+@@ -0,0 +1,158 @@
++package win.fantest.localwhisper;
++
++import org.json.JSONObject;
++
++import java.io.BufferedInputStream;
++import java.io.BufferedReader;
++import java.io.DataOutputStream;
++import java.io.File;
++import java.io.FileInputStream;
++import java.io.InputStream;
++import java.io.InputStreamReader;
++import java.net.HttpURLConnection;
++import java.net.URL;
++import java.nio.charset.StandardCharsets;
++
++public final class RemoteTranscriptionClient {
++    public static final class Result {
++        public final String text;
++        public final String language;
++        public final long durationMs;
++        public final long processingMs;
++        public final String engine;
++        public final String modelId;
++        public final String modelName;
++
++        Result(String text, String language, long durationMs, long processingMs,
++               String engine, String modelId, String modelName) {
++            this.text = text;
++            this.language = language;
++            this.durationMs = durationMs;
++            this.processingMs = processingMs;
++            this.engine = engine;
++            this.modelId = modelId;
++            this.modelName = modelName;
++        }
++    }
++
++    private static final int CONNECT_TIMEOUT_MS = 6000;
++    private static final int READ_TIMEOUT_MS = 15 * 60 * 1000;
++
++    private RemoteTranscriptionClient() {}
++
++    public static Result transcribe(
++            File audio,
++            String language,
++            String output,
++            boolean timestamps,
++            String performance,
++            String modelId
++    ) throws Exception {
++        if (audio == null || !audio.isFile() || audio.length() == 0L) {
++            throw new IllegalArgumentException("Audio file is unavailable");
++        }
++
++        String boundary = "----LocalWhisper" + Long.toHexString(System.nanoTime());
++        URL url = new URL(AppPrefs.REMOTE_BASE_URL + "/v1/transcribe");
++        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
++        connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
++        connection.setReadTimeout(READ_TIMEOUT_MS);
++        connection.setRequestMethod("POST");
++        connection.setDoOutput(true);
++        connection.setUseCaches(false);
++        connection.setRequestProperty("Accept", "application/json");
++        connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
++
++        try (DataOutputStream out = new DataOutputStream(connection.getOutputStream())) {
++            field(out, boundary, "language", language == null ? "auto" : language);
++            field(out, boundary, "output", output == null ? "original" : output);
++            field(out, boundary, "timestamps", timestamps ? "true" : "false");
++            field(out, boundary, "performance", performance == null ? "fast" : performance);
++            field(out, boundary, "model_id", modelId == null ? ModelCatalog.QUALITY : modelId);
++
++            out.writeBytes("--" + boundary + "\r\n");
++            out.writeBytes("Content-Disposition: form-data; name=\"file\"; filename=\"" +
++                    safeName(audio.getName()) + "\"\r\n");
++            out.writeBytes("Content-Type: application/octet-stream\r\n\r\n");
++            try (BufferedInputStream in = new BufferedInputStream(new FileInputStream(audio))) {
++                byte[] buffer = new byte[256 * 1024];
++                int count;
++                while ((count = in.read(buffer)) != -1) out.write(buffer, 0, count);
++            }
++            out.writeBytes("\r\n--" + boundary + "--\r\n");
++            out.flush();
++        }
++
++        int code = connection.getResponseCode();
++        InputStream stream = code >= 200 && code < 300
++                ? connection.getInputStream()
++                : connection.getErrorStream();
++        String body = readAll(stream);
++        connection.disconnect();
++
++        if (code < 200 || code >= 300) {
++            String detail = body;
++            try {
++                detail = new JSONObject(body).optString("detail", body);
++            } catch (Exception ignored) {}
++            throw new IllegalStateException("Master PC HTTP " + code + ": " + detail);
++        }
++
++        JSONObject json = new JSONObject(body);
++        if (!json.optBoolean("ok", false)) {
++            throw new IllegalStateException(json.optString("detail", "Master PC transcription failed"));
++        }
++
++        String text = json.optString("text", "").trim();
++        if (text.isEmpty()) throw new IllegalStateException("Master PC returned no text");
++
++        return new Result(
++                text,
++                json.optString("language", ""),
++                json.optLong("duration_ms", 0L),
++                json.optLong("processing_ms", 0L),
++                json.optString("engine", "master-pc"),
++                json.optString("model_id", modelId),
++                json.optString("model", "")
++        );
++    }
++
++    public static boolean healthCheck() {
++        HttpURLConnection connection = null;
++        try {
++            connection = (HttpURLConnection) new URL(AppPrefs.REMOTE_BASE_URL + "/health").openConnection();
++            connection.setConnectTimeout(2500);
++            connection.setReadTimeout(2500);
++            connection.setRequestMethod("GET");
++            int code = connection.getResponseCode();
++            if (code != 200) return false;
++            String body = readAll(connection.getInputStream());
++            return new JSONObject(body).optBoolean("ok", false);
++        } catch (Exception ignored) {
++            return false;
++        } finally {
++            if (connection != null) connection.disconnect();
++        }
++    }
++
++    private static void field(DataOutputStream out, String boundary, String name, String value) throws Exception {
++        out.writeBytes("--" + boundary + "\r\n");
++        out.writeBytes("Content-Disposition: form-data; name=\"" + name + "\"\r\n\r\n");
++        out.write(value.getBytes(StandardCharsets.UTF_8));
++        out.writeBytes("\r\n");
++    }
++
++    private static String safeName(String name) {
++        return name == null ? "audio.bin" : name.replace("\"", "_").replace("\r", "_").replace("\n", "_");
++    }
++
++    private static String readAll(InputStream input) throws Exception {
++        if (input == null) return "";
++        try (BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))) {
++            StringBuilder out = new StringBuilder();
++            String line;
++            while ((line = reader.readLine()) != null) out.append(line);
++            return out.toString();
++        }
++    }
++}
+diff --git a/app/src/main/java/win/fantest/localwhisper/TranscriptDb.java b/app/src/main/java/win/fantest/localwhisper/TranscriptDb.java
+index 32c544a..77b94d2 100644
+--- a/app/src/main/java/win/fantest/localwhisper/TranscriptDb.java
++++ b/app/src/main/java/win/fantest/localwhisper/TranscriptDb.java
+@@ -11,7 +11,7 @@ import java.util.List;
+ 
+ public final class TranscriptDb extends SQLiteOpenHelper {
+     private static final String DB_NAME = "transcripts.db";
+-    private static final int DB_VERSION = 2;
++    private static final int DB_VERSION = 3;
+ 
+     public static final String PENDING = "PENDING";
+     public static final String PROCESSING = "PROCESSING";
+@@ -32,6 +32,7 @@ public final class TranscriptDb extends SQLiteOpenHelper {
+         public String performanceProfile;
+         public long processingMs;
+         public long parentId;
++        public String engineSource;
+     }
+ 
+     public TranscriptDb(Context context) {
+@@ -54,7 +55,8 @@ public final class TranscriptDb extends SQLiteOpenHelper {
+                         "model_id TEXT NOT NULL DEFAULT ''," +
+                         "performance_profile TEXT NOT NULL DEFAULT 'fast'," +
+                         "processing_ms INTEGER NOT NULL DEFAULT 0," +
+-                        "parent_id INTEGER NOT NULL DEFAULT 0" +
++                        "parent_id INTEGER NOT NULL DEFAULT 0," +
++                        "engine_source TEXT NOT NULL DEFAULT 'device'" +
+                         ")"
+         );
+         db.execSQL("CREATE INDEX idx_transcript_status_id ON transcript(status, id)");
+@@ -70,6 +72,9 @@ public final class TranscriptDb extends SQLiteOpenHelper {
+             db.execSQL("ALTER TABLE transcript ADD COLUMN parent_id INTEGER NOT NULL DEFAULT 0");
+             db.execSQL("CREATE INDEX IF NOT EXISTS idx_transcript_created_id ON transcript(created_at, id)");
+         }
++        if (oldVersion < 3) {
++            db.execSQL("ALTER TABLE transcript ADD COLUMN engine_source TEXT NOT NULL DEFAULT 'device'");
++        }
+     }
+ 
+     public long insertPending(String name, String audioPath) {
+@@ -138,7 +143,7 @@ public final class TranscriptDb extends SQLiteOpenHelper {
+     }
+ 
+     public void markDone(long id, String text, String language, long durationMs,
+-                         String modelId, String performanceProfile, long processingMs) {
++                         String modelId, String performanceProfile, long processingMs, String engineSource) {
+         ContentValues values = new ContentValues();
+         values.put("status", DONE);
+         values.put("text", text == null ? "" : text);
+@@ -147,12 +152,13 @@ public final class TranscriptDb extends SQLiteOpenHelper {
+         values.put("model_id", modelId == null ? "" : modelId);
+         values.put("performance_profile", performanceProfile == null ? AppPrefs.PERFORMANCE_FAST : performanceProfile);
+         values.put("processing_ms", processingMs);
++        values.put("engine_source", engineSource == null ? "device" : engineSource);
+         values.put("error", "");
+         getWritableDatabase().update("transcript", values, "id=?", new String[]{String.valueOf(id)});
+     }
+ 
+     public void markDone(long id, String text, String language, long durationMs) {
+-        markDone(id, text, language, durationMs, "", AppPrefs.PERFORMANCE_FAST, 0L);
++        markDone(id, text, language, durationMs, "", AppPrefs.PERFORMANCE_FAST, 0L, "device");
+     }
+ 
+     public void markFailed(long id, String error) {
+@@ -173,8 +179,8 @@ public final class TranscriptDb extends SQLiteOpenHelper {
+         String[] args = null;
+         if (!normalized.isEmpty()) {
+             String like = "%" + normalized + "%";
+-            selection = "name LIKE ? OR text LIKE ? OR language LIKE ? OR model_id LIKE ? OR performance_profile LIKE ?";
+-            args = new String[]{like, like, like, like, like};
++            selection = "name LIKE ? OR text LIKE ? OR language LIKE ? OR model_id LIKE ? OR performance_profile LIKE ? OR engine_source LIKE ?";
++            args = new String[]{like, like, like, like, like, like};
+         }
+         try (Cursor c = getReadableDatabase().query(
+                 "transcript", null, selection, args, null, null,
+@@ -190,9 +196,9 @@ public final class TranscriptDb extends SQLiteOpenHelper {
+         String sql = "SELECT COUNT(*) FROM transcript";
+         String[] args = null;
+         if (!normalized.isEmpty()) {
+-            sql += " WHERE name LIKE ? OR text LIKE ? OR language LIKE ? OR model_id LIKE ? OR performance_profile LIKE ?";
++            sql += " WHERE name LIKE ? OR text LIKE ? OR language LIKE ? OR model_id LIKE ? OR performance_profile LIKE ? OR engine_source LIKE ?";
+             String like = "%" + normalized + "%";
+-            args = new String[]{like, like, like, like, like};
++            args = new String[]{like, like, like, like, like, like};
+         }
+         try (Cursor c = getReadableDatabase().rawQuery(sql, args)) {
+             return c.moveToFirst() ? c.getInt(0) : 0;
+@@ -231,6 +237,8 @@ public final class TranscriptDb extends SQLiteOpenHelper {
+         job.processingMs = processingIndex >= 0 ? c.getLong(processingIndex) : 0L;
+         int parentIndex = c.getColumnIndex("parent_id");
+         job.parentId = parentIndex >= 0 ? c.getLong(parentIndex) : 0L;
++        int engineIndex = c.getColumnIndex("engine_source");
++        job.engineSource = engineIndex >= 0 ? c.getString(engineIndex) : "device";
+         return job;
+     }
+ }
+diff --git a/app/src/main/java/win/fantest/localwhisper/TranscriptionService.java b/app/src/main/java/win/fantest/localwhisper/TranscriptionService.java
+index 7318497..66329cb 100644
+--- a/app/src/main/java/win/fantest/localwhisper/TranscriptionService.java
++++ b/app/src/main/java/win/fantest/localwhisper/TranscriptionService.java
+@@ -1,263 +1,317 @@
+-package win.fantest.localwhisper;
+-
+-import android.app.Notification;
+-import android.app.NotificationChannel;
+-import android.app.NotificationManager;
+-import android.app.Service;
+-import android.content.Intent;
+-import android.content.pm.ServiceInfo;
+-import android.os.Build;
+-import android.os.IBinder;
+-
+-import java.io.File;
+-import java.util.concurrent.ExecutorService;
+-import java.util.concurrent.Executors;
+-import java.util.concurrent.atomic.AtomicBoolean;
+-
+-public final class TranscriptionService extends Service {
+-    public static final String ACTION_PROCESS = "win.fantest.localwhisper.PROCESS";
+-    public static final String ACTION_CHANGED = "win.fantest.localwhisper.CHANGED";
+-    public static final String ACTION_PROGRESS = "win.fantest.localwhisper.PROGRESS";
+-
+-    public static final String EXTRA_JOB_ID = "job_id";
+-    public static final String EXTRA_NAME = "name";
+-    public static final String EXTRA_STAGE = "stage";
+-    public static final String EXTRA_PROGRESS = "progress";
+-    public static final String EXTRA_PREVIEW = "preview";
+-
+-    private static final String CHANNEL_ID = "transcription";
+-    private static final int NOTIFICATION_ID = 4101;
+-
+-    private ExecutorService executor;
+-    private final AtomicBoolean draining = new AtomicBoolean(false);
+-    private TranscriptionStateStore liveState;
+-
+-    @Override
+-    public void onCreate() {
+-        super.onCreate();
+-        executor = Executors.newSingleThreadExecutor();
+-        liveState = new TranscriptionStateStore(this);
+-        createNotificationChannel();
+-    }
+-
+-    @Override
+-    public int onStartCommand(Intent intent, int flags, int startId) {
+-        startForegroundCompat(notification("Preparing local transcription…", 0, 0));
+-        if (draining.compareAndSet(false, true)) {
+-            executor.submit(() -> {
+-                try {
+-                    drainQueue();
+-                } finally {
+-                    draining.set(false);
+-                    WhisperEngineCache.releaseLater();
+-                    stopForeground(STOP_FOREGROUND_REMOVE);
+-                    stopSelfResult(startId);
+-                }
+-            });
+-        }
+-        return START_REDELIVER_INTENT;
+-    }
+-
+-    private void drainQueue() {
+-        TranscriptDb db = new TranscriptDb(this);
+-        db.resetInterrupted();
+-        AppPrefs prefs = new AppPrefs(this);
+-        ModelManager modelManager = new ModelManager(this);
+-
+-        TranscriptDb.Job job;
+-        while ((job = db.nextPending()) != null) {
+-            String modelId = job.modelId == null || job.modelId.isBlank() ? prefs.model() : job.modelId;
+-            String performanceProfile = normalizePerformanceProfile(job.performanceProfile, prefs.performanceProfile());
+-            File model = modelManager.modelFile(modelId);
+-
+-            if (!modelManager.isInstalled(modelId)) {
+-                String error = "Model not installed: " + ModelCatalog.get(modelId).title;
+-                db.markFailed(job.id, error);
+-                liveState.fail(job.id, job.name, error);
+-                sendProgress(job, "Failed", -1, error);
+-                notifyChanged();
+-                continue;
+-            }
+-
+-            report(job, "Loading Whisper model · " + ModelCatalog.get(modelId).title, -1, "", db.pendingCount(), true);
+-            long engine = WhisperEngineCache.acquire(model.getAbsolutePath());
+-            if (engine == 0L) {
+-                String error = "Could not load Whisper model";
+-                db.markFailed(job.id, error);
+-                liveState.fail(job.id, job.name, error);
+-                sendProgress(job, "Failed", -1, error);
+-                notifyChanged();
+-                continue;
+-            }
+-
+-            db.markProcessing(job.id, modelId, performanceProfile);
+-            int remaining = db.pendingCount();
+-            report(job, "Decoding voice note", -1, "", remaining, true);
+-
+-            File audio = new File(job.audioPath);
+-            long started = System.currentTimeMillis();
+-            try {
+-                if (!audio.isFile()) throw new IllegalStateException("Original audio is no longer available");
+-                AudioDecoder.DecodedAudio decoded = AudioDecoder.decode(audio);
+-                report(job, "Preparing transcription", -1, "", remaining, true);
+-
+-                String language = prefs.language();
+-                boolean timestamps = prefs.timestamps();
+-                String outputMode = prefs.outputMode();
+-                String result;
+-                String detected;
+-
+-                if (AppPrefs.OUTPUT_ENGLISH.equals(outputMode)) {
+-                    ProgressEmitter emitter = new ProgressEmitter(job, "Translating to English", 0, 1, remaining);
+-                    result = WhisperNative.transcribe(engine, decoded.samples, language, true, timestamps, performanceProfile, emitter);
+-                    detected = WhisperNative.detectedLanguage(engine);
+-                } else if (AppPrefs.OUTPUT_BOTH.equals(outputMode)) {
+-                    ProgressEmitter originalEmitter = new ProgressEmitter(job, "Transcribing original", 0, 2, remaining);
+-                    String original = WhisperNative.transcribe(engine, decoded.samples, language, false, timestamps, performanceProfile, originalEmitter);
+-                    detected = WhisperNative.detectedLanguage(engine);
+-                    ProgressEmitter englishEmitter = new ProgressEmitter(job, "Translating to English", 1, 2, remaining);
+-                    String english = WhisperNative.transcribe(engine, decoded.samples, language, true, timestamps, performanceProfile, englishEmitter);
+-                    result = "Original:\n" + original + "\n\nEnglish:\n" + english;
+-                } else {
+-                    ProgressEmitter emitter = new ProgressEmitter(job, "Transcribing", 0, 1, remaining);
+-                    result = WhisperNative.transcribe(engine, decoded.samples, language, false, timestamps, performanceProfile, emitter);
+-                    detected = WhisperNative.detectedLanguage(engine);
+-                }
+-
+-                if (result == null || result.trim().isEmpty()) {
+-                    throw new IllegalStateException("Whisper returned no text");
+-                }
+-
+-                long elapsed = Math.max(1L, System.currentTimeMillis() - started);
+-                String finalText = result.trim();
+-                db.markDone(job.id, finalText, detected, decoded.durationMs, modelId, performanceProfile, elapsed);
+-                liveState.complete(job.id, job.name, finalText);
+-                sendProgress(job, "Complete", 100, finalText);
+-                if (!prefs.keepAudio() && db.audioReferenceCount(job.audioPath) <= 1) audio.delete();
+-                String speed = decoded.durationMs > 0L
+-                        ? String.format(java.util.Locale.US, " · %.2fx realtime", (double) decoded.durationMs / (double) elapsed)
+-                        : "";
+-                updateNotification("Finished " + job.name + " · " + elapsed / 1000L + "s" + speed, 100, 100);
+-            } catch (Throwable t) {
+-                String error = readableError(t);
+-                db.markFailed(job.id, error);
+-                liveState.fail(job.id, job.name, error);
+-                sendProgress(job, "Failed", -1, error);
+-            }
+-            notifyChanged();
+-        }
+-        notifyChanged();
+-    }
+-
+-    private static String normalizePerformanceProfile(String jobMode, String fallback) {
+-        String value = jobMode == null || jobMode.isBlank() ? fallback : jobMode;
+-        if (AppPrefs.PERFORMANCE_BALANCED.equals(value) || AppPrefs.PERFORMANCE_ACCURATE.equals(value)) return value;
+-        return AppPrefs.PERFORMANCE_FAST;
+-    }
+-
+-
+-    private final class ProgressEmitter implements WhisperNative.ProgressListener {
+-        private final TranscriptDb.Job job;
+-        private final String stage;
+-        private final int passIndex;
+-        private final int passCount;
+-        private final int remaining;
+-        private int lastProgress = -10;
+-        private String lastPreview = "";
+-
+-        ProgressEmitter(TranscriptDb.Job job, String stage, int passIndex, int passCount, int remaining) {
+-            this.job = job;
+-            this.stage = stage;
+-            this.passIndex = passIndex;
+-            this.passCount = passCount;
+-            this.remaining = remaining;
+-        }
+-
+-        @Override public void onProgress(int percent, String partialText) {
+-            int mapped = ProgressMapper.mapPass(percent, passIndex, passCount);
+-            String preview = partialText == null ? "" : partialText.trim();
+-            boolean changedText = !preview.equals(lastPreview);
+-            if (mapped < 100 && mapped - lastProgress < 2 && !changedText) return;
+-            lastProgress = mapped;
+-            lastPreview = preview;
+-            report(job, stage, mapped, preview, remaining, true);
+-        }
+-    }
+-
+-    private void report(TranscriptDb.Job job, String stage, int progress, String preview,
+-                        int remaining, boolean notifyUi) {
+-        liveState.update(job.id, job.name, stage, progress, preview);
+-        updateNotification(stage + " · " + job.name, progress < 0 ? 0 : progress, progress < 0 ? 0 : 100);
+-        if (notifyUi) sendProgress(job, stage, progress, preview);
+-        notifyChanged();
+-    }
+-
+-    private void sendProgress(TranscriptDb.Job job, String stage, int progress, String preview) {
+-        Intent i = new Intent(ACTION_PROGRESS)
+-                .setPackage(getPackageName())
+-                .putExtra(EXTRA_JOB_ID, job.id)
+-                .putExtra(EXTRA_NAME, job.name)
+-                .putExtra(EXTRA_STAGE, stage)
+-                .putExtra(EXTRA_PROGRESS, progress)
+-                .putExtra(EXTRA_PREVIEW, preview == null ? "" : preview);
+-        sendBroadcast(i);
+-    }
+-
+-    private static String readableError(Throwable t) {
+-        String message = t.getMessage();
+-        if (message == null || message.trim().isEmpty()) message = t.getClass().getSimpleName();
+-        return message;
+-    }
+-
+-    private void notifyChanged() {
+-        sendBroadcast(new Intent(ACTION_CHANGED).setPackage(getPackageName()));
+-    }
+-
+-    private void createNotificationChannel() {
+-        if (Build.VERSION.SDK_INT >= 26) {
+-            NotificationChannel channel = new NotificationChannel(
+-                    CHANNEL_ID,
+-                    getString(R.string.channel_name),
+-                    NotificationManager.IMPORTANCE_LOW
+-            );
+-            channel.setDescription(getString(R.string.channel_description));
+-            ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).createNotificationChannel(channel);
+-        }
+-    }
+-
+-    private Notification notification(String text, int progress, int max) {
+-        Notification.Builder builder = Build.VERSION.SDK_INT >= 26
+-                ? new Notification.Builder(this, CHANNEL_ID)
+-                : new Notification.Builder(this);
+-
+-        builder.setContentTitle("Local Whisper")
+-                .setContentText(text)
+-                .setSmallIcon(R.drawable.ic_notification)
+-                .setOngoing(true)
+-                .setOnlyAlertOnce(true);
+-
+-        if (max > 0) builder.setProgress(max, Math.max(0, Math.min(max, progress)), false);
+-        else builder.setProgress(0, 0, true);
+-        return builder.build();
+-    }
+-
+-    private void updateNotification(String text, int progress, int max) {
+-        ((NotificationManager) getSystemService(NOTIFICATION_SERVICE))
+-                .notify(NOTIFICATION_ID, notification(text, progress, max));
+-    }
+-
+-    private void startForegroundCompat(Notification notification) {
+-        if (Build.VERSION.SDK_INT >= 35) {
+-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING);
+-        } else {
+-            startForeground(NOTIFICATION_ID, notification);
+-        }
+-    }
+-
+-    @Override public void onDestroy() {
+-        if (executor != null) executor.shutdownNow();
+-        super.onDestroy();
+-    }
+-
+-    @Override public IBinder onBind(Intent intent) { return null; }
+-}
++package win.fantest.localwhisper;
++
++import android.app.Notification;
++import android.app.NotificationChannel;
++import android.app.NotificationManager;
++import android.app.Service;
++import android.content.Intent;
++import android.content.pm.ServiceInfo;
++import android.os.Build;
++import android.os.IBinder;
++
++import java.io.File;
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++import java.util.concurrent.atomic.AtomicBoolean;
++
++public final class TranscriptionService extends Service {
++    public static final String ACTION_PROCESS = "win.fantest.localwhisper.PROCESS";
++    public static final String ACTION_CHANGED = "win.fantest.localwhisper.CHANGED";
++    public static final String ACTION_PROGRESS = "win.fantest.localwhisper.PROGRESS";
++
++    public static final String EXTRA_JOB_ID = "job_id";
++    public static final String EXTRA_NAME = "name";
++    public static final String EXTRA_STAGE = "stage";
++    public static final String EXTRA_PROGRESS = "progress";
++    public static final String EXTRA_PREVIEW = "preview";
++
++    private static final String CHANNEL_ID = "transcription";
++    private static final int NOTIFICATION_ID = 4101;
++
++    private ExecutorService executor;
++    private final AtomicBoolean draining = new AtomicBoolean(false);
++    private TranscriptionStateStore liveState;
++
++    @Override
++    public void onCreate() {
++        super.onCreate();
++        executor = Executors.newSingleThreadExecutor();
++        liveState = new TranscriptionStateStore(this);
++        createNotificationChannel();
++    }
++
++    @Override
++    public int onStartCommand(Intent intent, int flags, int startId) {
++        startForegroundCompat(notification("Preparing transcription…", 0, 0));
++        if (draining.compareAndSet(false, true)) {
++            executor.submit(() -> {
++                try {
++                    drainQueue();
++                } finally {
++                    draining.set(false);
++                    WhisperEngineCache.releaseLater();
++                    stopForeground(STOP_FOREGROUND_REMOVE);
++                    stopSelfResult(startId);
++                }
++            });
++        }
++        return START_REDELIVER_INTENT;
++    }
++
++    private void drainQueue() {
++        TranscriptDb db = new TranscriptDb(this);
++        db.resetInterrupted();
++        AppPrefs prefs = new AppPrefs(this);
++        ModelManager modelManager = new ModelManager(this);
++
++        TranscriptDb.Job job;
++        while ((job = db.nextPending()) != null) {
++            String modelId = job.modelId == null || job.modelId.isBlank() ? prefs.model() : job.modelId;
++            String performanceProfile = normalizePerformanceProfile(job.performanceProfile, prefs.performanceProfile());
++            File audio = new File(job.audioPath == null ? "" : job.audioPath);
++            int remaining = db.pendingCount();
++
++            if (!audio.isFile()) {
++                String error = "Original audio is no longer available";
++                db.markFailed(job.id, error);
++                liveState.fail(job.id, job.name, error);
++                sendProgress(job, "Failed", -1, error);
++                notifyChanged();
++                continue;
++            }
++
++            db.markProcessing(job.id, modelId, performanceProfile);
++            long started = System.currentTimeMillis();
++
++            if (prefs.remoteFirst()) {
++                try {
++                    report(job, "Sending to Master PC", 5, "", remaining, true);
++                    RemoteTranscriptionClient.Result remote = RemoteTranscriptionClient.transcribe(
++                            audio,
++                            prefs.language(),
++                            prefs.outputMode(),
++                            prefs.timestamps(),
++                            performanceProfile,
++                            modelId
++                    );
++                    long elapsed = Math.max(1L, System.currentTimeMillis() - started);
++                    String finalModelId = remote.modelId == null || remote.modelId.isBlank() ? modelId : remote.modelId;
++                    db.markDone(
++                            job.id,
++                            remote.text,
++                            remote.language,
++                            remote.durationMs,
++                            finalModelId,
++                            performanceProfile,
++                            elapsed,
++                            "master-pc"
++                    );
++                    liveState.complete(job.id, job.name, remote.text);
++                    sendProgress(job, "Complete · Master PC", 100, remote.text);
++                    if (!prefs.keepAudio() && db.audioReferenceCount(job.audioPath) <= 1) audio.delete();
++                    String speed = remote.durationMs > 0L
++                            ? String.format(java.util.Locale.US, " · %.2fx realtime", (double) remote.durationMs / (double) elapsed)
++                            : "";
++                    updateNotification("Finished on Master PC · " + job.name + " · " + elapsed / 1000L + "s" + speed, 100, 100);
++                    notifyChanged();
++                    continue;
++                } catch (Throwable remoteError) {
++                    String reason = readableError(remoteError);
++                    report(job, "Master PC unavailable · local fallback", -1, reason, remaining, true);
++                    if (!modelManager.isInstalled(modelId)) {
++                        String error = "Master PC unavailable: " + reason + " · local model not installed";
++                        db.markFailed(job.id, error);
++                        liveState.fail(job.id, job.name, error);
++                        sendProgress(job, "Failed", -1, error);
++                        notifyChanged();
++                        continue;
++                    }
++                }
++            }
++
++            File model = modelManager.modelFile(modelId);
++            if (!modelManager.isInstalled(modelId)) {
++                String error = "Model not installed: " + ModelCatalog.get(modelId).title;
++                db.markFailed(job.id, error);
++                liveState.fail(job.id, job.name, error);
++                sendProgress(job, "Failed", -1, error);
++                notifyChanged();
++                continue;
++            }
++
++            report(job, "Loading local Whisper · " + ModelCatalog.get(modelId).title, -1, "", remaining, true);
++            long engine = WhisperEngineCache.acquire(model.getAbsolutePath());
++            if (engine == 0L) {
++                String error = "Could not load local Whisper model";
++                db.markFailed(job.id, error);
++                liveState.fail(job.id, job.name, error);
++                sendProgress(job, "Failed", -1, error);
++                notifyChanged();
++                continue;
++            }
++
++            report(job, "Decoding voice note locally", -1, "", remaining, true);
++            try {
++                AudioDecoder.DecodedAudio decoded = AudioDecoder.decode(audio);
++                report(job, "Preparing local transcription", -1, "", remaining, true);
++
++                String language = prefs.language();
++                boolean timestamps = prefs.timestamps();
++                String outputMode = prefs.outputMode();
++                String result;
++                String detected;
++
++                if (AppPrefs.OUTPUT_ENGLISH.equals(outputMode)) {
++                    ProgressEmitter emitter = new ProgressEmitter(job, "Translating locally", 0, 1, remaining);
++                    result = WhisperNative.transcribe(engine, decoded.samples, language, true, timestamps, performanceProfile, emitter);
++                    detected = WhisperNative.detectedLanguage(engine);
++                } else if (AppPrefs.OUTPUT_BOTH.equals(outputMode)) {
++                    ProgressEmitter originalEmitter = new ProgressEmitter(job, "Transcribing locally", 0, 2, remaining);
++                    String original = WhisperNative.transcribe(engine, decoded.samples, language, false, timestamps, performanceProfile, originalEmitter);
++                    detected = WhisperNative.detectedLanguage(engine);
++                    ProgressEmitter englishEmitter = new ProgressEmitter(job, "Translating locally", 1, 2, remaining);
++                    String english = WhisperNative.transcribe(engine, decoded.samples, language, true, timestamps, performanceProfile, englishEmitter);
++                    result = "Original:\n" + original + "\n\nEnglish:\n" + english;
++                } else {
++                    ProgressEmitter emitter = new ProgressEmitter(job, "Transcribing locally", 0, 1, remaining);
++                    result = WhisperNative.transcribe(engine, decoded.samples, language, false, timestamps, performanceProfile, emitter);
++                    detected = WhisperNative.detectedLanguage(engine);
++                }
++
++                if (result == null || result.trim().isEmpty()) {
++                    throw new IllegalStateException("Whisper returned no text");
++                }
++
++                long elapsed = Math.max(1L, System.currentTimeMillis() - started);
++                String finalText = result.trim();
++                db.markDone(job.id, finalText, detected, decoded.durationMs, modelId, performanceProfile, elapsed, "device");
++                liveState.complete(job.id, job.name, finalText);
++                sendProgress(job, "Complete · on-device", 100, finalText);
++                if (!prefs.keepAudio() && db.audioReferenceCount(job.audioPath) <= 1) audio.delete();
++                String speed = decoded.durationMs > 0L
++                        ? String.format(java.util.Locale.US, " · %.2fx realtime", (double) decoded.durationMs / (double) elapsed)
++                        : "";
++                updateNotification("Finished on-device · " + job.name + " · " + elapsed / 1000L + "s" + speed, 100, 100);
++            } catch (Throwable t) {
++                String error = readableError(t);
++                db.markFailed(job.id, error);
++                liveState.fail(job.id, job.name, error);
++                sendProgress(job, "Failed", -1, error);
++            }
++            notifyChanged();
++        }
++        notifyChanged();
++    }
++
++    private static String normalizePerformanceProfile(String jobMode, String fallback) {
++        String value = jobMode == null || jobMode.isBlank() ? fallback : jobMode;
++        if (AppPrefs.PERFORMANCE_BALANCED.equals(value) || AppPrefs.PERFORMANCE_ACCURATE.equals(value)) return value;
++        return AppPrefs.PERFORMANCE_FAST;
++    }
++
++
++    private final class ProgressEmitter implements WhisperNative.ProgressListener {
++        private final TranscriptDb.Job job;
++        private final String stage;
++        private final int passIndex;
++        private final int passCount;
++        private final int remaining;
++        private int lastProgress = -10;
++        private String lastPreview = "";
++
++        ProgressEmitter(TranscriptDb.Job job, String stage, int passIndex, int passCount, int remaining) {
++            this.job = job;
++            this.stage = stage;
++            this.passIndex = passIndex;
++            this.passCount = passCount;
++            this.remaining = remaining;
++        }
++
++        @Override public void onProgress(int percent, String partialText) {
++            int mapped = ProgressMapper.mapPass(percent, passIndex, passCount);
++            String preview = partialText == null ? "" : partialText.trim();
++            boolean changedText = !preview.equals(lastPreview);
++            if (mapped < 100 && mapped - lastProgress < 2 && !changedText) return;
++            lastProgress = mapped;
++            lastPreview = preview;
++            report(job, stage, mapped, preview, remaining, true);
++        }
++    }
++
++    private void report(TranscriptDb.Job job, String stage, int progress, String preview,
++                        int remaining, boolean notifyUi) {
++        liveState.update(job.id, job.name, stage, progress, preview);
++        updateNotification(stage + " · " + job.name, progress < 0 ? 0 : progress, progress < 0 ? 0 : 100);
++        if (notifyUi) sendProgress(job, stage, progress, preview);
++        notifyChanged();
++    }
++
++    private void sendProgress(TranscriptDb.Job job, String stage, int progress, String preview) {
++        Intent i = new Intent(ACTION_PROGRESS)
++                .setPackage(getPackageName())
++                .putExtra(EXTRA_JOB_ID, job.id)
++                .putExtra(EXTRA_NAME, job.name)
++                .putExtra(EXTRA_STAGE, stage)
++                .putExtra(EXTRA_PROGRESS, progress)
++                .putExtra(EXTRA_PREVIEW, preview == null ? "" : preview);
++        sendBroadcast(i);
++    }
++
++    private static String readableError(Throwable t) {
++        String message = t.getMessage();
++        if (message == null || message.trim().isEmpty()) message = t.getClass().getSimpleName();
++        return message;
++    }
++
++    private void notifyChanged() {
++        sendBroadcast(new Intent(ACTION_CHANGED).setPackage(getPackageName()));
++    }
++
++    private void createNotificationChannel() {
++        if (Build.VERSION.SDK_INT >= 26) {
++            NotificationChannel channel = new NotificationChannel(
++                    CHANNEL_ID,
++                    getString(R.string.channel_name),
++                    NotificationManager.IMPORTANCE_LOW
++            );
++            channel.setDescription(getString(R.string.channel_description));
++            ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).createNotificationChannel(channel);
++        }
++    }
++
++    private Notification notification(String text, int progress, int max) {
++        Notification.Builder builder = Build.VERSION.SDK_INT >= 26
++                ? new Notification.Builder(this, CHANNEL_ID)
++                : new Notification.Builder(this);
++
++        builder.setContentTitle("Local Whisper")
++                .setContentText(text)
++                .setSmallIcon(R.drawable.ic_notification)
++                .setOngoing(true)
++                .setOnlyAlertOnce(true);
++
++        if (max > 0) builder.setProgress(max, Math.max(0, Math.min(max, progress)), false);
++        else builder.setProgress(0, 0, true);
++        return builder.build();
++    }
++
++    private void updateNotification(String text, int progress, int max) {
++        ((NotificationManager) getSystemService(NOTIFICATION_SERVICE))
++                .notify(NOTIFICATION_ID, notification(text, progress, max));
++    }
++
++    private void startForegroundCompat(Notification notification) {
++        if (Build.VERSION.SDK_INT >= 35) {
++            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING);
++        } else {
++            startForeground(NOTIFICATION_ID, notification);
++        }
++    }
++
++    @Override public void onDestroy() {
++        if (executor != null) executor.shutdownNow();
++        super.onDestroy();
++    }
++
++    @Override public IBinder onBind(Intent intent) { return null; }
++}
+diff --git a/master-pc/remote-transcriber/README.md b/master-pc/remote-transcriber/README.md
+new file mode 100644
+index 0000000..882cae6
+--- /dev/null
++++ b/master-pc/remote-transcriber/README.md
+@@ -0,0 +1,39 @@
++# LocalWhisper v0.2.5 Master PC remote transcription
++
++This component is the default transcription backend for LocalWhisper v0.2.5.
++
++## Architecture
++
++- S25 uploads the imported voice-note file directly across the private Tailscale tailnet.
++- Endpoint: `http://master-pc-1.tail46be8b.ts.net:8766/v1/transcribe`.
++- Transport is plain HTTP **inside Tailscale's encrypted WireGuard tunnel**; the port is not exposed to the public Internet.
++- MASTER-PC binds the service only to its Tailscale address.
++- Windows Firewall restricts TCP 8766 to the S25 Tailscale address.
++- The Android app automatically falls back to its on-device whisper.cpp engine if MASTER-PC cannot be reached.
++
++## MASTER-PC inference
++
++- GPU: NVIDIA RTX 2060
++- Engine: faster-whisper / CTranslate2 CUDA
++- Default model: Large v3 Turbo
++- Default compute type: int8_float16
++- Fast profile uses beam size 1.
++- Quality model is preloaded in the background when the server starts.
++- `quality` maps to `large-v3-turbo`; `fast` maps to `base`.
++
++The deployed machine uses CUDA/cuDNN DLLs already present on MASTER-PC. The production launcher is registered as the Windows scheduled task `LocalWhisper Master PC Transcriber`.
++
++## API
++
++`GET /health`
++
++`POST /v1/transcribe` multipart fields:
++
++- `file`
++- `language`: auto/ar/en
++- `output`: original/english/both
++- `timestamps`: true/false
++- `performance`: fast/balanced/accurate
++- `model_id`: quality/fast
++
++The response records the actual engine/model and server processing time.
+diff --git a/master-pc/remote-transcriber/requirements.txt b/master-pc/remote-transcriber/requirements.txt
+new file mode 100644
+index 0000000..470fb5b
+--- /dev/null
++++ b/master-pc/remote-transcriber/requirements.txt
+@@ -0,0 +1,4 @@
++﻿fastapi==0.141.1
++uvicorn[standard]==0.53.0
++python-multipart==0.0.32
++faster-whisper==1.2.1
+diff --git a/master-pc/remote-transcriber/run-server.ps1 b/master-pc/remote-transcriber/run-server.ps1
+new file mode 100644
+index 0000000..1be3a97
+--- /dev/null
++++ b/master-pc/remote-transcriber/run-server.ps1
+@@ -0,0 +1,28 @@
++$ErrorActionPreference = "SilentlyContinue"
++$root = "C:\LocalWhisper\remote-server"
++$python = "$root\venv\Scripts\python.exe"
++$server = "$root\server.py"
++$tailscale = "C:\Program Files\Tailscale\tailscale.exe"
++$log = "$root\logs\launcher.log"
++
++function Log($m) {
++    ("{0:u} {1}" -f (Get-Date), $m) | Add-Content -Path $log -Encoding UTF8
++}
++
++while ($true) {
++    try {
++        $ip = (& $tailscale ip -4 2>$null | Select-Object -First 1).Trim()
++        if (!$ip) {
++            Log "Waiting for Tailscale"
++            Start-Sleep -Seconds 10
++            continue
++        }
++        $env:LOCALWHISPER_REMOTE_BIND = $ip
++        Log ("Starting server on " + $ip + ":8766")
++        & $python $server
++        Log ("Server exited with code " + $LASTEXITCODE)
++    } catch {
++        Log ("Launcher error: " + $_.Exception.Message)
++    }
++    Start-Sleep -Seconds 5
++}
+diff --git a/master-pc/remote-transcriber/server.py b/master-pc/remote-transcriber/server.py
+new file mode 100644
+index 0000000..2b5832f
+--- /dev/null
++++ b/master-pc/remote-transcriber/server.py
+@@ -0,0 +1,208 @@
++from __future__ import annotations
++
++import os
++import shutil
++import tempfile
++import threading
++import time
++from pathlib import Path
++
++CUDA_DLL_DIR = r"C:\\LocalWhisper\\remote-server\\cuda-libs"
++if os.name == "nt" and os.path.isdir(CUDA_DLL_DIR):
++    os.add_dll_directory(CUDA_DLL_DIR)
++    os.environ["PATH"] = CUDA_DLL_DIR + os.pathsep + os.environ.get("PATH", "")
++
++from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
++from faster_whisper import WhisperModel
++
++ROOT = Path(r"C:\LocalWhisper\remote-server")
++MODEL_DIR = ROOT / "models"
++TMP_DIR = ROOT / "tmp"
++LOG_DIR = ROOT / "logs"
++MODEL_NAME = os.environ.get("LOCALWHISPER_REMOTE_MODEL", "large-v3-turbo")
++MODEL_NAMES = {"quality": MODEL_NAME, "fast": "base"}
++DEVICE = os.environ.get("LOCALWHISPER_REMOTE_DEVICE", "cuda")
++COMPUTE_TYPE = os.environ.get("LOCALWHISPER_REMOTE_COMPUTE", "int8_float16")
++BIND_HOST = os.environ.get("LOCALWHISPER_REMOTE_BIND", "100.68.12.73")
++ALLOWED_CLIENTS = {"127.0.0.1", "::1", "100.68.12.73", "100.99.16.99"}
++
++for d in (MODEL_DIR, TMP_DIR, LOG_DIR):
++    d.mkdir(parents=True, exist_ok=True)
++
++app = FastAPI(title="LocalWhisper Master PC", version="0.2.5")
++_models: dict[str, WhisperModel] = {}
++_model_lock = threading.Lock()
++_infer_lock = threading.Lock()
++_model_error = ""
++
++
++def _check_client(request: Request) -> None:
++    host = request.client.host if request.client else ""
++    if host not in ALLOWED_CLIENTS:
++        raise HTTPException(status_code=403, detail="Tailnet client not allowed")
++
++
++def _load_model(model_id: str = "quality") -> WhisperModel:
++    global _model_error
++    key = model_id if model_id in MODEL_NAMES else "quality"
++    if key in _models:
++        return _models[key]
++    with _model_lock:
++        if key in _models:
++            return _models[key]
++        try:
++            model = WhisperModel(
++                MODEL_NAMES[key],
++                device=DEVICE,
++                compute_type=COMPUTE_TYPE,
++                download_root=str(MODEL_DIR),
++            )
++            _models[key] = model
++            _model_error = ""
++            return model
++        except Exception as exc:
++            _model_error = f"{type(exc).__name__}: {exc}"
++            raise
++
++
++def _fmt_ts(seconds: float) -> str:
++    seconds = max(0, int(seconds))
++    return f"{seconds // 60:02d}:{seconds % 60:02d}"
++
++
++def _profile(profile: str) -> tuple[int, int, bool]:
++    p = (profile or "fast").lower()
++    if p == "accurate":
++        return 5, 5, True
++    if p == "balanced":
++        return 3, 3, True
++    return 1, 1, False
++
++
++def _run_pass(path: str, language: str, task: str, timestamps: bool, profile: str, model_id: str):
++    model = _load_model(model_id)
++    beam_size, best_of, condition_on_previous_text = _profile(profile)
++    kwargs = dict(
++        language=None if language in ("", "auto", None) else language,
++        task=task,
++        beam_size=beam_size,
++        best_of=best_of,
++        temperature=0.0,
++        vad_filter=True,
++        condition_on_previous_text=condition_on_previous_text,
++    )
++    segments, info = model.transcribe(path, **kwargs)
++    chunks = []
++    plain = []
++    for seg in segments:
++        text = (seg.text or "").strip()
++        if not text:
++            continue
++        plain.append(text)
++        chunks.append(f"[{_fmt_ts(seg.start)}] {text}" if timestamps else text)
++    return "\n".join(chunks).strip(), " ".join(plain).strip(), info
++
++
++@app.on_event("startup")
++def preload_quality_model():
++    threading.Thread(target=lambda: _load_model("quality"), daemon=True, name="localwhisper-prewarm").start()
++
++
++@app.get("/health")
++def health(request: Request):
++    _check_client(request)
++    return {
++        "ok": True,
++        "service": "LocalWhisper Master PC",
++        "version": "0.2.5",
++        "model": MODEL_NAME,
++        "device": DEVICE,
++        "compute_type": COMPUTE_TYPE,
++        "loaded_models": list(_models.keys()),
++        "model_loaded": "quality" in _models,
++        "model_error": _model_error,
++    }
++
++
++@app.post("/v1/warm")
++def warm(request: Request):
++    _check_client(request)
++    started = time.perf_counter()
++    try:
++        _load_model("quality")
++    except Exception as exc:
++        raise HTTPException(status_code=503, detail=f"Model load failed: {exc}")
++    return {"ok": True, "model": MODEL_NAME, "load_ms": round((time.perf_counter() - started) * 1000)}
++
++
++@app.post("/v1/transcribe")
++async def transcribe(
++    request: Request,
++    file: UploadFile = File(...),
++    language: str = Form("auto"),
++    output: str = Form("original"),
++    timestamps: bool = Form(False),
++    performance: str = Form("fast"),
++    model_id: str = Form("quality"),
++):
++    _check_client(request)
++    started = time.perf_counter()
++    suffix = Path(file.filename or "audio.bin").suffix[:12]
++    fd, temp_path = tempfile.mkstemp(prefix="lw_", suffix=suffix, dir=TMP_DIR)
++    os.close(fd)
++    try:
++        with open(temp_path, "wb") as out:
++            while True:
++                chunk = await file.read(1024 * 1024)
++                if not chunk:
++                    break
++                out.write(chunk)
++
++        if os.path.getsize(temp_path) == 0:
++            raise HTTPException(status_code=400, detail="Empty audio file")
++
++        with _infer_lock:
++            if output == "english":
++                translated, _, info = _run_pass(temp_path, language, "translate", timestamps, performance, model_id)
++                result = translated
++                detected = getattr(info, "language", "") or ""
++                duration = float(getattr(info, "duration", 0.0) or 0.0)
++            elif output == "both":
++                original, _, info = _run_pass(temp_path, language, "transcribe", timestamps, performance, model_id)
++                translated, _, _ = _run_pass(temp_path, language, "translate", timestamps, performance, model_id)
++                result = f"Original:\n{original}\n\nEnglish:\n{translated}"
++                detected = getattr(info, "language", "") or ""
++                duration = float(getattr(info, "duration", 0.0) or 0.0)
++            else:
++                original, _, info = _run_pass(temp_path, language, "transcribe", timestamps, performance, model_id)
++                result = original
++                detected = getattr(info, "language", "") or ""
++                duration = float(getattr(info, "duration", 0.0) or 0.0)
++
++        if not result.strip():
++            raise HTTPException(status_code=422, detail="Whisper returned no text")
++
++        elapsed_ms = round((time.perf_counter() - started) * 1000)
++        return {
++            "ok": True,
++            "text": result.strip(),
++            "language": detected,
++            "duration_ms": round(duration * 1000),
++            "processing_ms": elapsed_ms,
++            "engine": "master-pc-rtx2060",
++            "model": MODEL_NAMES.get(model_id, MODEL_NAME),
++            "model_id": model_id if model_id in MODEL_NAMES else "quality",
++            "compute_type": COMPUTE_TYPE,
++            "performance": performance,
++            "client": request.headers.get("tailscale-user-login", "tailnet"),
++        }
++    finally:
++        try:
++            os.remove(temp_path)
++        except OSError:
++            pass
++
++
++if __name__ == "__main__":
++    import uvicorn
++    uvicorn.run(app, host=BIND_HOST, port=8766, log_level="info")
+diff --git a/tools/v025_remote_contract_test.py b/tools/v025_remote_contract_test.py
+new file mode 100644
+index 0000000..ccda139
+--- /dev/null
++++ b/tools/v025_remote_contract_test.py
+@@ -0,0 +1,33 @@
++from pathlib import Path
++
++root = Path(__file__).resolve().parents[1]
++build = (root/'app/build.gradle.kts').read_text()
++manifest = (root/'app/src/main/AndroidManifest.xml').read_text()
++prefs = (root/'app/src/main/java/win/fantest/localwhisper/AppPrefs.java').read_text()
++remote = (root/'app/src/main/java/win/fantest/localwhisper/RemoteTranscriptionClient.java').read_text()
++svc = (root/'app/src/main/java/win/fantest/localwhisper/TranscriptionService.java').read_text()
++db = (root/'app/src/main/java/win/fantest/localwhisper/TranscriptDb.java').read_text()
++ui = (root/'app/src/main/java/win/fantest/localwhisper/MainUi.java').read_text()
++main = (root/'app/src/main/java/win/fantest/localwhisper/MainActivity.java').read_text()
++quick = (root/'app/src/main/java/win/fantest/localwhisper/QuickTranscribeTileService.java').read_text()
++server = (root/'master-pc/remote-transcriber/server.py').read_text()
++
++checks = {
++    'v025 version': 'versionCode = 9' in build and 'versionName = "0.2.5"' in build,
++    'remote default': 'remoteFirst()' in prefs and 'getBoolean(KEY_REMOTE_FIRST, true)' in prefs,
++    'tailscale endpoint': 'master-pc-1.tail46be8b.ts.net:8766' in prefs,
++    'remote multipart client': 'multipart/form-data' in remote and '/v1/transcribe' in remote and 'model_id' in remote,
++    'remote first service': 'prefs.remoteFirst()' in svc and 'Sending to Master PC' in svc,
++    'automatic local fallback': 'Master PC unavailable · local fallback' in svc and 'WhisperEngineCache.acquire' in svc,
++    'db engine source': 'DB_VERSION = 3' in db and 'engine_source' in db and 'engineSource' in db,
++    'engine visible': 'Master PC · ' in main and 'On-device · ' in main,
++    'remote toggle': 'remoteFirstSwitch' in ui and 'Master PC transcription first' in ui,
++    'tailscale cleartext only transport support': 'android:usesCleartextTraffic="true"' in manifest and 'android.permission.INTERNET' in manifest,
++    'quick WhatsApp preserved': 'QuickTranscribeTileService' in manifest and 'latest WhatsApp' in quick,
++    'master server source': 'faster_whisper' in server and 'large-v3-turbo' in server and 'int8_float16' in server,
++    'server model mapping': 'MODEL_NAMES' in server and '"fast": "base"' in server,
++}
++failed = [name for name, ok in checks.items() if not ok]
++if failed:
++    raise SystemExit('FAIL: ' + ', '.join(failed))
++print('PASS: v0.2.5 remote-first contract')
