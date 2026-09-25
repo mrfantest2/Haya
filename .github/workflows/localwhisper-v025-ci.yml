@@ -155,19 +155,19 @@ jobs:
           set -euo pipefail
           cd "$PROJECT"
           cat <<'SUMS' | sha256sum -c -
-          db42a0672d5b8519e35014a78560b6149f06cde52090f804bee073f570a89b67  app/build.gradle.kts
-          9118a33d23e97c30b54da9aa918f4ff5d5e2f1e5a39fdea81d08faa40ff54348  app/src/main/AndroidManifest.xml
-          cecb6aecaaea8b462bb8b09bab443a7def1c8f480e4d21486297191d294a0941  app/src/main/java/win/fantest/localwhisper/AppPrefs.java
-          585725f247c6a4639975ade8580baa725d304aacd87c50261c7cc3d841a0b2ad  app/src/main/java/win/fantest/localwhisper/MainActivity.java
-          ba6ba6afd1ae9cc6a95e6540dbef21f04371ece988253d6d76e6188a6f3884a9  app/src/main/java/win/fantest/localwhisper/MainUi.java
-          a32e699f1f5e8951eaa19c1b54cda90c56b1f8872cff7a60823f675fb6ccb59d  app/src/main/java/win/fantest/localwhisper/RemoteTranscriptionClient.java
-          a9712338affa3fed69dd703efe99e7d02ab650c0a1880d9e3edafdc294167a38  app/src/main/java/win/fantest/localwhisper/TranscriptDb.java
+          1775ebfa41bb92101e59bc08af6ce2799c511d5ccaf1014c6ef6aa9c070f4806  app/build.gradle.kts
+          126b605bfdb6e7ac1f55fc6def1b8523708a14add6117f0a2d1a3bef1e5b4af2  app/src/main/AndroidManifest.xml
+          03300d479318ab711071fc1010136049c6617f64dce8206b9d1c49f48742f48f  app/src/main/java/win/fantest/localwhisper/AppPrefs.java
+          c6223036ba93a8a97fc6270a9ee878cb03f3f805dfe701fa945dd67887c087b1  app/src/main/java/win/fantest/localwhisper/MainActivity.java
+          0072cbeab86a45247e860b257a27820b62762d40e71d50fc94a1a0f3c5bd6b9e  app/src/main/java/win/fantest/localwhisper/MainUi.java
+          76787b2de3d72545d353349084d64e8d44c1ec95e989f5bee163c968e38b4dc4  app/src/main/java/win/fantest/localwhisper/RemoteTranscriptionClient.java
+          89fd08378bab6b9bc585c0692d00f6a8bfbcadb8b7aaa13b0b544d99c5d2b9c4  app/src/main/java/win/fantest/localwhisper/TranscriptDb.java
           46e65115cb4f2f2d10fe1e2a10cc85bb8d5e0b280ff2a76d9a97cee11c3b3ee4  app/src/main/java/win/fantest/localwhisper/TranscriptionService.java
-          ea2269966b55c7b933d5a6151e734000c514c4f0ca7f3a78b8dae1dc16d2ea55  master-pc/remote-transcriber/README.md
-          5606277cd0a0ba6647e9a1f754e11fdfffc7b6e1aa8456f085f35980d88c87b0  master-pc/remote-transcriber/requirements.txt
-          a4b7a5bbbf4635cdcc0c3d1fa5cde8ab60230b59fe5e7751fbc67380bc623dd0  master-pc/remote-transcriber/run-server.ps1
-          772803314f837d1b8d67bbeed413b04ab50c44a8a329b93e3305b42564104573  master-pc/remote-transcriber/server.py
-          9444001effd5eaa38fc28e91990b2b75a45ca7ec8c5d6de97a24a1159ff591dd  tools/v025_remote_contract_test.py
+          6cd875778e1237e788a0a000a18bd7b7d75d35a30188142b7bc58529c71b18ce  master-pc/remote-transcriber/README.md
+          9432a10a4452c0f2090a0ef53f90450380467e9f0554988c3453d77afea3e0a6  master-pc/remote-transcriber/requirements.txt
+          c81a785914efbb0c81c02d898c3d044d7cd42b0c9a09d13b7660656eb9560b53  master-pc/remote-transcriber/run-server.ps1
+          11a11de6f5f3e5bd1ebf45eaa3e157bd34c7d4f738b80471a116a605831e4384  master-pc/remote-transcriber/server.py
+          cd35465871e9271f649812f56382f13abc13b5922a329800e13ea428d6e3f548  tools/v025_remote_contract_test.py
           SUMS
           grep -Fq 'versionCode = 9' app/build.gradle.kts
           grep -Fq 'versionName = "0.2.5"' app/build.gradle.kts
