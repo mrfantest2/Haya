@@ -145,7 +145,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo '168ac059e62b1175d28fa5876dac110bbfd67ea88429f26f7b3e622c1f557e05  ci/localwhisper-v025-remote.patch' | sha256sum -c -
+          echo '7520a705dd6f213627a44bab6446c221a3dc04614abd4ff98e01129a20c9ef0f  ci/localwhisper-v025-remote.patch' | sha256sum -c -
           cd "$PROJECT"
           patch -p1 < "$GITHUB_WORKSPACE/ci/localwhisper-v025-remote.patch"
 
@@ -162,11 +162,14 @@ jobs:
           0072cbeab86a45247e860b257a27820b62762d40e71d50fc94a1a0f3c5bd6b9e  app/src/main/java/win/fantest/localwhisper/MainUi.java
           76787b2de3d72545d353349084d64e8d44c1ec95e989f5bee163c968e38b4dc4  app/src/main/java/win/fantest/localwhisper/RemoteTranscriptionClient.java
           89fd08378bab6b9bc585c0692d00f6a8bfbcadb8b7aaa13b0b544d99c5d2b9c4  app/src/main/java/win/fantest/localwhisper/TranscriptDb.java
-          1e440da2116b65abc4b55448a71f8aa4fcddbc1b316b87007758495bcfea4877  app/src/main/java/win/fantest/localwhisper/TranscriptionService.java
+          c1bc8acf4f9938fa997161d2988821664fadfb03a5c67927fde92224984590c5  app/src/main/java/win/fantest/localwhisper/TranscriptionService.java
           6cd875778e1237e788a0a000a18bd7b7d75d35a30188142b7bc58529c71b18ce  master-pc/remote-transcriber/README.md
           414a1cda8509ace40f34018976ab43f3f3cdce397a14b1c2ff8487b4cb09be7f  master-pc/remote-transcriber/requirements.txt
           c81a785914efbb0c81c02d898c3d044d7cd42b0c9a09d13b7660656eb9560b53  master-pc/remote-transcriber/run-server.ps1
           11a11de6f5f3e5bd1ebf45eaa3e157bd34c7d4f738b80471a116a605831e4384  master-pc/remote-transcriber/server.py
+          d721f33521c93d975167bd54aa20c340d649137be7f06b671219a921eab7fe39  tools/v021_contract_test.py
+          b7a547bbf5e8a6071c9ba500f93da791eb0565df5b1c3d5394f8fc32afe84339  tools/v022_visual_contract_test.py
+          e0aecc6d07067e750c3dbde728b466147103ca7097a8aaef4df6ff7b0b4de14d  tools/v023_visual_contract_test.py
           cd35465871e9271f649812f56382f13abc13b5922a329800e13ea428d6e3f548  tools/v025_remote_contract_test.py
           SUMS
           grep -Fq 'versionCode = 9' app/build.gradle.kts

@@ -442,346 +442,26 @@ index 32c544a..77b94d2 100644
      }
  }
 diff --git a/app/src/main/java/win/fantest/localwhisper/TranscriptionService.java b/app/src/main/java/win/fantest/localwhisper/TranscriptionService.java
-index 7318497..66329cb 100644
+index 7318497..1ef40be 100644
 --- a/app/src/main/java/win/fantest/localwhisper/TranscriptionService.java
 +++ b/app/src/main/java/win/fantest/localwhisper/TranscriptionService.java
-@@ -1,263 +1,317 @@
--package win.fantest.localwhisper;
--
--import android.app.Notification;
--import android.app.NotificationChannel;
--import android.app.NotificationManager;
--import android.app.Service;
--import android.content.Intent;
--import android.content.pm.ServiceInfo;
--import android.os.Build;
--import android.os.IBinder;
--
--import java.io.File;
--import java.util.concurrent.ExecutorService;
--import java.util.concurrent.Executors;
--import java.util.concurrent.atomic.AtomicBoolean;
--
--public final class TranscriptionService extends Service {
--    public static final String ACTION_PROCESS = "win.fantest.localwhisper.PROCESS";
--    public static final String ACTION_CHANGED = "win.fantest.localwhisper.CHANGED";
--    public static final String ACTION_PROGRESS = "win.fantest.localwhisper.PROGRESS";
--
--    public static final String EXTRA_JOB_ID = "job_id";
--    public static final String EXTRA_NAME = "name";
--    public static final String EXTRA_STAGE = "stage";
--    public static final String EXTRA_PROGRESS = "progress";
--    public static final String EXTRA_PREVIEW = "preview";
--
--    private static final String CHANNEL_ID = "transcription";
--    private static final int NOTIFICATION_ID = 4101;
--
--    private ExecutorService executor;
--    private final AtomicBoolean draining = new AtomicBoolean(false);
--    private TranscriptionStateStore liveState;
--
--    @Override
--    public void onCreate() {
--        super.onCreate();
--        executor = Executors.newSingleThreadExecutor();
--        liveState = new TranscriptionStateStore(this);
--        createNotificationChannel();
--    }
--
--    @Override
--    public int onStartCommand(Intent intent, int flags, int startId) {
+@@ -42,7 +42,7 @@ public final class TranscriptionService extends Service {
+ 
+     @Override
+     public int onStartCommand(Intent intent, int flags, int startId) {
 -        startForegroundCompat(notification("Preparing local transcription…", 0, 0));
--        if (draining.compareAndSet(false, true)) {
--            executor.submit(() -> {
--                try {
--                    drainQueue();
--                } finally {
--                    draining.set(false);
--                    WhisperEngineCache.releaseLater();
--                    stopForeground(STOP_FOREGROUND_REMOVE);
--                    stopSelfResult(startId);
--                }
--            });
--        }
--        return START_REDELIVER_INTENT;
--    }
--
--    private void drainQueue() {
--        TranscriptDb db = new TranscriptDb(this);
--        db.resetInterrupted();
--        AppPrefs prefs = new AppPrefs(this);
--        ModelManager modelManager = new ModelManager(this);
--
--        TranscriptDb.Job job;
--        while ((job = db.nextPending()) != null) {
--            String modelId = job.modelId == null || job.modelId.isBlank() ? prefs.model() : job.modelId;
--            String performanceProfile = normalizePerformanceProfile(job.performanceProfile, prefs.performanceProfile());
--            File model = modelManager.modelFile(modelId);
--
--            if (!modelManager.isInstalled(modelId)) {
--                String error = "Model not installed: " + ModelCatalog.get(modelId).title;
--                db.markFailed(job.id, error);
--                liveState.fail(job.id, job.name, error);
--                sendProgress(job, "Failed", -1, error);
--                notifyChanged();
--                continue;
--            }
--
--            report(job, "Loading Whisper model · " + ModelCatalog.get(modelId).title, -1, "", db.pendingCount(), true);
--            long engine = WhisperEngineCache.acquire(model.getAbsolutePath());
--            if (engine == 0L) {
--                String error = "Could not load Whisper model";
--                db.markFailed(job.id, error);
--                liveState.fail(job.id, job.name, error);
--                sendProgress(job, "Failed", -1, error);
--                notifyChanged();
--                continue;
--            }
--
--            db.markProcessing(job.id, modelId, performanceProfile);
--            int remaining = db.pendingCount();
--            report(job, "Decoding voice note", -1, "", remaining, true);
--
--            File audio = new File(job.audioPath);
--            long started = System.currentTimeMillis();
--            try {
--                if (!audio.isFile()) throw new IllegalStateException("Original audio is no longer available");
--                AudioDecoder.DecodedAudio decoded = AudioDecoder.decode(audio);
--                report(job, "Preparing transcription", -1, "", remaining, true);
--
--                String language = prefs.language();
--                boolean timestamps = prefs.timestamps();
--                String outputMode = prefs.outputMode();
--                String result;
--                String detected;
--
--                if (AppPrefs.OUTPUT_ENGLISH.equals(outputMode)) {
--                    ProgressEmitter emitter = new ProgressEmitter(job, "Translating to English", 0, 1, remaining);
--                    result = WhisperNative.transcribe(engine, decoded.samples, language, true, timestamps, performanceProfile, emitter);
--                    detected = WhisperNative.detectedLanguage(engine);
--                } else if (AppPrefs.OUTPUT_BOTH.equals(outputMode)) {
--                    ProgressEmitter originalEmitter = new ProgressEmitter(job, "Transcribing original", 0, 2, remaining);
--                    String original = WhisperNative.transcribe(engine, decoded.samples, language, false, timestamps, performanceProfile, originalEmitter);
--                    detected = WhisperNative.detectedLanguage(engine);
--                    ProgressEmitter englishEmitter = new ProgressEmitter(job, "Translating to English", 1, 2, remaining);
--                    String english = WhisperNative.transcribe(engine, decoded.samples, language, true, timestamps, performanceProfile, englishEmitter);
--                    result = "Original:\n" + original + "\n\nEnglish:\n" + english;
--                } else {
--                    ProgressEmitter emitter = new ProgressEmitter(job, "Transcribing", 0, 1, remaining);
--                    result = WhisperNative.transcribe(engine, decoded.samples, language, false, timestamps, performanceProfile, emitter);
--                    detected = WhisperNative.detectedLanguage(engine);
--                }
--
--                if (result == null || result.trim().isEmpty()) {
--                    throw new IllegalStateException("Whisper returned no text");
--                }
--
--                long elapsed = Math.max(1L, System.currentTimeMillis() - started);
--                String finalText = result.trim();
--                db.markDone(job.id, finalText, detected, decoded.durationMs, modelId, performanceProfile, elapsed);
--                liveState.complete(job.id, job.name, finalText);
--                sendProgress(job, "Complete", 100, finalText);
--                if (!prefs.keepAudio() && db.audioReferenceCount(job.audioPath) <= 1) audio.delete();
--                String speed = decoded.durationMs > 0L
--                        ? String.format(java.util.Locale.US, " · %.2fx realtime", (double) decoded.durationMs / (double) elapsed)
--                        : "";
--                updateNotification("Finished " + job.name + " · " + elapsed / 1000L + "s" + speed, 100, 100);
--            } catch (Throwable t) {
--                String error = readableError(t);
--                db.markFailed(job.id, error);
--                liveState.fail(job.id, job.name, error);
--                sendProgress(job, "Failed", -1, error);
--            }
--            notifyChanged();
--        }
--        notifyChanged();
--    }
--
--    private static String normalizePerformanceProfile(String jobMode, String fallback) {
--        String value = jobMode == null || jobMode.isBlank() ? fallback : jobMode;
--        if (AppPrefs.PERFORMANCE_BALANCED.equals(value) || AppPrefs.PERFORMANCE_ACCURATE.equals(value)) return value;
--        return AppPrefs.PERFORMANCE_FAST;
--    }
--
--
--    private final class ProgressEmitter implements WhisperNative.ProgressListener {
--        private final TranscriptDb.Job job;
--        private final String stage;
--        private final int passIndex;
--        private final int passCount;
--        private final int remaining;
--        private int lastProgress = -10;
--        private String lastPreview = "";
--
--        ProgressEmitter(TranscriptDb.Job job, String stage, int passIndex, int passCount, int remaining) {
--            this.job = job;
--            this.stage = stage;
--            this.passIndex = passIndex;
--            this.passCount = passCount;
--            this.remaining = remaining;
--        }
--
--        @Override public void onProgress(int percent, String partialText) {
--            int mapped = ProgressMapper.mapPass(percent, passIndex, passCount);
--            String preview = partialText == null ? "" : partialText.trim();
--            boolean changedText = !preview.equals(lastPreview);
--            if (mapped < 100 && mapped - lastProgress < 2 && !changedText) return;
--            lastProgress = mapped;
--            lastPreview = preview;
--            report(job, stage, mapped, preview, remaining, true);
--        }
--    }
--
--    private void report(TranscriptDb.Job job, String stage, int progress, String preview,
--                        int remaining, boolean notifyUi) {
--        liveState.update(job.id, job.name, stage, progress, preview);
--        updateNotification(stage + " · " + job.name, progress < 0 ? 0 : progress, progress < 0 ? 0 : 100);
--        if (notifyUi) sendProgress(job, stage, progress, preview);
--        notifyChanged();
--    }
--
--    private void sendProgress(TranscriptDb.Job job, String stage, int progress, String preview) {
--        Intent i = new Intent(ACTION_PROGRESS)
--                .setPackage(getPackageName())
--                .putExtra(EXTRA_JOB_ID, job.id)
--                .putExtra(EXTRA_NAME, job.name)
--                .putExtra(EXTRA_STAGE, stage)
--                .putExtra(EXTRA_PROGRESS, progress)
--                .putExtra(EXTRA_PREVIEW, preview == null ? "" : preview);
--        sendBroadcast(i);
--    }
--
--    private static String readableError(Throwable t) {
--        String message = t.getMessage();
--        if (message == null || message.trim().isEmpty()) message = t.getClass().getSimpleName();
--        return message;
--    }
--
--    private void notifyChanged() {
--        sendBroadcast(new Intent(ACTION_CHANGED).setPackage(getPackageName()));
--    }
--
--    private void createNotificationChannel() {
--        if (Build.VERSION.SDK_INT >= 26) {
--            NotificationChannel channel = new NotificationChannel(
--                    CHANNEL_ID,
--                    getString(R.string.channel_name),
--                    NotificationManager.IMPORTANCE_LOW
--            );
--            channel.setDescription(getString(R.string.channel_description));
--            ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).createNotificationChannel(channel);
--        }
--    }
--
--    private Notification notification(String text, int progress, int max) {
--        Notification.Builder builder = Build.VERSION.SDK_INT >= 26
--                ? new Notification.Builder(this, CHANNEL_ID)
--                : new Notification.Builder(this);
--
--        builder.setContentTitle("Local Whisper")
--                .setContentText(text)
--                .setSmallIcon(R.drawable.ic_notification)
--                .setOngoing(true)
--                .setOnlyAlertOnce(true);
--
--        if (max > 0) builder.setProgress(max, Math.max(0, Math.min(max, progress)), false);
--        else builder.setProgress(0, 0, true);
--        return builder.build();
--    }
--
--    private void updateNotification(String text, int progress, int max) {
--        ((NotificationManager) getSystemService(NOTIFICATION_SERVICE))
--                .notify(NOTIFICATION_ID, notification(text, progress, max));
--    }
--
--    private void startForegroundCompat(Notification notification) {
--        if (Build.VERSION.SDK_INT >= 35) {
--            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING);
--        } else {
--            startForeground(NOTIFICATION_ID, notification);
--        }
--    }
--
--    @Override public void onDestroy() {
--        if (executor != null) executor.shutdownNow();
--        super.onDestroy();
--    }
--
--    @Override public IBinder onBind(Intent intent) { return null; }
--}
-+package win.fantest.localwhisper;
-+
-+import android.app.Notification;
-+import android.app.NotificationChannel;
-+import android.app.NotificationManager;
-+import android.app.Service;
-+import android.content.Intent;
-+import android.content.pm.ServiceInfo;
-+import android.os.Build;
-+import android.os.IBinder;
-+
-+import java.io.File;
-+import java.util.concurrent.ExecutorService;
-+import java.util.concurrent.Executors;
-+import java.util.concurrent.atomic.AtomicBoolean;
-+
-+public final class TranscriptionService extends Service {
-+    public static final String ACTION_PROCESS = "win.fantest.localwhisper.PROCESS";
-+    public static final String ACTION_CHANGED = "win.fantest.localwhisper.CHANGED";
-+    public static final String ACTION_PROGRESS = "win.fantest.localwhisper.PROGRESS";
-+
-+    public static final String EXTRA_JOB_ID = "job_id";
-+    public static final String EXTRA_NAME = "name";
-+    public static final String EXTRA_STAGE = "stage";
-+    public static final String EXTRA_PROGRESS = "progress";
-+    public static final String EXTRA_PREVIEW = "preview";
-+
-+    private static final String CHANNEL_ID = "transcription";
-+    private static final int NOTIFICATION_ID = 4101;
-+
-+    private ExecutorService executor;
-+    private final AtomicBoolean draining = new AtomicBoolean(false);
-+    private TranscriptionStateStore liveState;
-+
-+    @Override
-+    public void onCreate() {
-+        super.onCreate();
-+        executor = Executors.newSingleThreadExecutor();
-+        liveState = new TranscriptionStateStore(this);
-+        createNotificationChannel();
-+    }
-+
-+    @Override
-+    public int onStartCommand(Intent intent, int flags, int startId) {
 +        startForegroundCompat(notification("Preparing transcription…", 0, 0));
-+        if (draining.compareAndSet(false, true)) {
-+            executor.submit(() -> {
-+                try {
-+                    drainQueue();
-+                } finally {
-+                    draining.set(false);
-+                    WhisperEngineCache.releaseLater();
-+                    stopForeground(STOP_FOREGROUND_REMOVE);
-+                    stopSelfResult(startId);
-+                }
-+            });
-+        }
-+        return START_REDELIVER_INTENT;
-+    }
-+
-+    private void drainQueue() {
-+        TranscriptDb db = new TranscriptDb(this);
-+        db.resetInterrupted();
-+        AppPrefs prefs = new AppPrefs(this);
-+        ModelManager modelManager = new ModelManager(this);
-+
-+        TranscriptDb.Job job;
-+        while ((job = db.nextPending()) != null) {
-+            String modelId = job.modelId == null || job.modelId.isBlank() ? prefs.model() : job.modelId;
-+            String performanceProfile = normalizePerformanceProfile(job.performanceProfile, prefs.performanceProfile());
+         if (draining.compareAndSet(false, true)) {
+             executor.submit(() -> {
+                 try {
+@@ -68,8 +68,68 @@ public final class TranscriptionService extends Service {
+         while ((job = db.nextPending()) != null) {
+             String modelId = job.modelId == null || job.modelId.isBlank() ? prefs.model() : job.modelId;
+             String performanceProfile = normalizePerformanceProfile(job.performanceProfile, prefs.performanceProfile());
+-            File model = modelManager.modelFile(modelId);
 +            File audio = new File(job.audioPath == null ? "" : job.audioPath);
 +            int remaining = db.pendingCount();
-+
+ 
 +            if (!audio.isFile()) {
 +                String error = "Original audio is no longer available";
 +                db.markFailed(job.id, error);
@@ -841,191 +521,82 @@ index 7318497..66329cb 100644
 +            }
 +
 +            File model = modelManager.modelFile(modelId);
-+            if (!modelManager.isInstalled(modelId)) {
-+                String error = "Model not installed: " + ModelCatalog.get(modelId).title;
-+                db.markFailed(job.id, error);
-+                liveState.fail(job.id, job.name, error);
-+                sendProgress(job, "Failed", -1, error);
-+                notifyChanged();
-+                continue;
-+            }
-+
-+            report(job, "Loading local Whisper · " + ModelCatalog.get(modelId).title, -1, "", remaining, true);
-+            long engine = WhisperEngineCache.acquire(model.getAbsolutePath());
-+            if (engine == 0L) {
+             if (!modelManager.isInstalled(modelId)) {
+                 String error = "Model not installed: " + ModelCatalog.get(modelId).title;
+                 db.markFailed(job.id, error);
+@@ -79,10 +139,10 @@ public final class TranscriptionService extends Service {
+                 continue;
+             }
+ 
+-            report(job, "Loading Whisper model · " + ModelCatalog.get(modelId).title, -1, "", db.pendingCount(), true);
++            report(job, "Loading Whisper model locally · " + ModelCatalog.get(modelId).title, -1, "", remaining, true);
+             long engine = WhisperEngineCache.acquire(model.getAbsolutePath());
+             if (engine == 0L) {
+-                String error = "Could not load Whisper model";
 +                String error = "Could not load local Whisper model";
-+                db.markFailed(job.id, error);
-+                liveState.fail(job.id, job.name, error);
-+                sendProgress(job, "Failed", -1, error);
-+                notifyChanged();
-+                continue;
-+            }
-+
+                 db.markFailed(job.id, error);
+                 liveState.fail(job.id, job.name, error);
+                 sendProgress(job, "Failed", -1, error);
+@@ -90,16 +150,10 @@ public final class TranscriptionService extends Service {
+                 continue;
+             }
+ 
+-            db.markProcessing(job.id, modelId, performanceProfile);
+-            int remaining = db.pendingCount();
+-            report(job, "Decoding voice note", -1, "", remaining, true);
+-
+-            File audio = new File(job.audioPath);
+-            long started = System.currentTimeMillis();
 +            report(job, "Decoding voice note locally", -1, "", remaining, true);
-+            try {
-+                AudioDecoder.DecodedAudio decoded = AudioDecoder.decode(audio);
-+                report(job, "Preparing local transcription", -1, "", remaining, true);
-+
-+                String language = prefs.language();
-+                boolean timestamps = prefs.timestamps();
-+                String outputMode = prefs.outputMode();
-+                String result;
-+                String detected;
-+
-+                if (AppPrefs.OUTPUT_ENGLISH.equals(outputMode)) {
+             try {
+-                if (!audio.isFile()) throw new IllegalStateException("Original audio is no longer available");
+                 AudioDecoder.DecodedAudio decoded = AudioDecoder.decode(audio);
+-                report(job, "Preparing transcription", -1, "", remaining, true);
++                report(job, "Preparing transcription locally", -1, "", remaining, true);
+ 
+                 String language = prefs.language();
+                 boolean timestamps = prefs.timestamps();
+@@ -108,18 +162,18 @@ public final class TranscriptionService extends Service {
+                 String detected;
+ 
+                 if (AppPrefs.OUTPUT_ENGLISH.equals(outputMode)) {
+-                    ProgressEmitter emitter = new ProgressEmitter(job, "Translating to English", 0, 1, remaining);
 +                    ProgressEmitter emitter = new ProgressEmitter(job, "Translating locally", 0, 1, remaining);
-+                    result = WhisperNative.transcribe(engine, decoded.samples, language, true, timestamps, performanceProfile, emitter);
-+                    detected = WhisperNative.detectedLanguage(engine);
-+                } else if (AppPrefs.OUTPUT_BOTH.equals(outputMode)) {
+                     result = WhisperNative.transcribe(engine, decoded.samples, language, true, timestamps, performanceProfile, emitter);
+                     detected = WhisperNative.detectedLanguage(engine);
+                 } else if (AppPrefs.OUTPUT_BOTH.equals(outputMode)) {
+-                    ProgressEmitter originalEmitter = new ProgressEmitter(job, "Transcribing original", 0, 2, remaining);
 +                    ProgressEmitter originalEmitter = new ProgressEmitter(job, "Transcribing locally", 0, 2, remaining);
-+                    String original = WhisperNative.transcribe(engine, decoded.samples, language, false, timestamps, performanceProfile, originalEmitter);
-+                    detected = WhisperNative.detectedLanguage(engine);
+                     String original = WhisperNative.transcribe(engine, decoded.samples, language, false, timestamps, performanceProfile, originalEmitter);
+                     detected = WhisperNative.detectedLanguage(engine);
+-                    ProgressEmitter englishEmitter = new ProgressEmitter(job, "Translating to English", 1, 2, remaining);
 +                    ProgressEmitter englishEmitter = new ProgressEmitter(job, "Translating locally", 1, 2, remaining);
-+                    String english = WhisperNative.transcribe(engine, decoded.samples, language, true, timestamps, performanceProfile, englishEmitter);
-+                    result = "Original:\n" + original + "\n\nEnglish:\n" + english;
-+                } else {
+                     String english = WhisperNative.transcribe(engine, decoded.samples, language, true, timestamps, performanceProfile, englishEmitter);
+                     result = "Original:\n" + original + "\n\nEnglish:\n" + english;
+                 } else {
+-                    ProgressEmitter emitter = new ProgressEmitter(job, "Transcribing", 0, 1, remaining);
 +                    ProgressEmitter emitter = new ProgressEmitter(job, "Transcribing locally", 0, 1, remaining);
-+                    result = WhisperNative.transcribe(engine, decoded.samples, language, false, timestamps, performanceProfile, emitter);
-+                    detected = WhisperNative.detectedLanguage(engine);
-+                }
-+
-+                if (result == null || result.trim().isEmpty()) {
-+                    throw new IllegalStateException("Whisper returned no text");
-+                }
-+
-+                long elapsed = Math.max(1L, System.currentTimeMillis() - started);
-+                String finalText = result.trim();
+                     result = WhisperNative.transcribe(engine, decoded.samples, language, false, timestamps, performanceProfile, emitter);
+                     detected = WhisperNative.detectedLanguage(engine);
+                 }
+@@ -130,14 +184,14 @@ public final class TranscriptionService extends Service {
+ 
+                 long elapsed = Math.max(1L, System.currentTimeMillis() - started);
+                 String finalText = result.trim();
+-                db.markDone(job.id, finalText, detected, decoded.durationMs, modelId, performanceProfile, elapsed);
 +                db.markDone(job.id, finalText, detected, decoded.durationMs, modelId, performanceProfile, elapsed, "device");
-+                liveState.complete(job.id, job.name, finalText);
+                 liveState.complete(job.id, job.name, finalText);
+-                sendProgress(job, "Complete", 100, finalText);
 +                sendProgress(job, "Complete · on-device", 100, finalText);
-+                if (!prefs.keepAudio() && db.audioReferenceCount(job.audioPath) <= 1) audio.delete();
-+                String speed = decoded.durationMs > 0L
-+                        ? String.format(java.util.Locale.US, " · %.2fx realtime", (double) decoded.durationMs / (double) elapsed)
-+                        : "";
+                 if (!prefs.keepAudio() && db.audioReferenceCount(job.audioPath) <= 1) audio.delete();
+                 String speed = decoded.durationMs > 0L
+                         ? String.format(java.util.Locale.US, " · %.2fx realtime", (double) decoded.durationMs / (double) elapsed)
+                         : "";
+-                updateNotification("Finished " + job.name + " · " + elapsed / 1000L + "s" + speed, 100, 100);
 +                updateNotification("Finished on-device · " + job.name + " · " + elapsed / 1000L + "s" + speed, 100, 100);
-+            } catch (Throwable t) {
-+                String error = readableError(t);
-+                db.markFailed(job.id, error);
-+                liveState.fail(job.id, job.name, error);
-+                sendProgress(job, "Failed", -1, error);
-+            }
-+            notifyChanged();
-+        }
-+        notifyChanged();
-+    }
-+
-+    private static String normalizePerformanceProfile(String jobMode, String fallback) {
-+        String value = jobMode == null || jobMode.isBlank() ? fallback : jobMode;
-+        if (AppPrefs.PERFORMANCE_BALANCED.equals(value) || AppPrefs.PERFORMANCE_ACCURATE.equals(value)) return value;
-+        return AppPrefs.PERFORMANCE_FAST;
-+    }
-+
-+
-+    private final class ProgressEmitter implements WhisperNative.ProgressListener {
-+        private final TranscriptDb.Job job;
-+        private final String stage;
-+        private final int passIndex;
-+        private final int passCount;
-+        private final int remaining;
-+        private int lastProgress = -10;
-+        private String lastPreview = "";
-+
-+        ProgressEmitter(TranscriptDb.Job job, String stage, int passIndex, int passCount, int remaining) {
-+            this.job = job;
-+            this.stage = stage;
-+            this.passIndex = passIndex;
-+            this.passCount = passCount;
-+            this.remaining = remaining;
-+        }
-+
-+        @Override public void onProgress(int percent, String partialText) {
-+            int mapped = ProgressMapper.mapPass(percent, passIndex, passCount);
-+            String preview = partialText == null ? "" : partialText.trim();
-+            boolean changedText = !preview.equals(lastPreview);
-+            if (mapped < 100 && mapped - lastProgress < 2 && !changedText) return;
-+            lastProgress = mapped;
-+            lastPreview = preview;
-+            report(job, stage, mapped, preview, remaining, true);
-+        }
-+    }
-+
-+    private void report(TranscriptDb.Job job, String stage, int progress, String preview,
-+                        int remaining, boolean notifyUi) {
-+        liveState.update(job.id, job.name, stage, progress, preview);
-+        updateNotification(stage + " · " + job.name, progress < 0 ? 0 : progress, progress < 0 ? 0 : 100);
-+        if (notifyUi) sendProgress(job, stage, progress, preview);
-+        notifyChanged();
-+    }
-+
-+    private void sendProgress(TranscriptDb.Job job, String stage, int progress, String preview) {
-+        Intent i = new Intent(ACTION_PROGRESS)
-+                .setPackage(getPackageName())
-+                .putExtra(EXTRA_JOB_ID, job.id)
-+                .putExtra(EXTRA_NAME, job.name)
-+                .putExtra(EXTRA_STAGE, stage)
-+                .putExtra(EXTRA_PROGRESS, progress)
-+                .putExtra(EXTRA_PREVIEW, preview == null ? "" : preview);
-+        sendBroadcast(i);
-+    }
-+
-+    private static String readableError(Throwable t) {
-+        String message = t.getMessage();
-+        if (message == null || message.trim().isEmpty()) message = t.getClass().getSimpleName();
-+        return message;
-+    }
-+
-+    private void notifyChanged() {
-+        sendBroadcast(new Intent(ACTION_CHANGED).setPackage(getPackageName()));
-+    }
-+
-+    private void createNotificationChannel() {
-+        if (Build.VERSION.SDK_INT >= 26) {
-+            NotificationChannel channel = new NotificationChannel(
-+                    CHANNEL_ID,
-+                    getString(R.string.channel_name),
-+                    NotificationManager.IMPORTANCE_LOW
-+            );
-+            channel.setDescription(getString(R.string.channel_description));
-+            ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).createNotificationChannel(channel);
-+        }
-+    }
-+
-+    private Notification notification(String text, int progress, int max) {
-+        Notification.Builder builder = Build.VERSION.SDK_INT >= 26
-+                ? new Notification.Builder(this, CHANNEL_ID)
-+                : new Notification.Builder(this);
-+
-+        builder.setContentTitle("Local Whisper")
-+                .setContentText(text)
-+                .setSmallIcon(R.drawable.ic_notification)
-+                .setOngoing(true)
-+                .setOnlyAlertOnce(true);
-+
-+        if (max > 0) builder.setProgress(max, Math.max(0, Math.min(max, progress)), false);
-+        else builder.setProgress(0, 0, true);
-+        return builder.build();
-+    }
-+
-+    private void updateNotification(String text, int progress, int max) {
-+        ((NotificationManager) getSystemService(NOTIFICATION_SERVICE))
-+                .notify(NOTIFICATION_ID, notification(text, progress, max));
-+    }
-+
-+    private void startForegroundCompat(Notification notification) {
-+        if (Build.VERSION.SDK_INT >= 35) {
-+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING);
-+        } else {
-+            startForeground(NOTIFICATION_ID, notification);
-+        }
-+    }
-+
-+    @Override public void onDestroy() {
-+        if (executor != null) executor.shutdownNow();
-+        super.onDestroy();
-+    }
-+
-+    @Override public IBinder onBind(Intent intent) { return null; }
-+}
+             } catch (Throwable t) {
+                 String error = readableError(t);
+                 db.markFailed(job.id, error);
 diff --git a/master-pc/remote-transcriber/README.md b/master-pc/remote-transcriber/README.md
 new file mode 100644
 index 0000000..882cae6
@@ -1073,7 +644,7 @@ index 0000000..882cae6
 +The response records the actual engine/model and server processing time.
 diff --git a/master-pc/remote-transcriber/requirements.txt b/master-pc/remote-transcriber/requirements.txt
 new file mode 100644
-index 0000000..470fb5b
+index 0000000..f9cce99
 --- /dev/null
 +++ b/master-pc/remote-transcriber/requirements.txt
 @@ -0,0 +1,4 @@
@@ -1329,6 +900,43 @@ index 0000000..2b5832f
 +if __name__ == "__main__":
 +    import uvicorn
 +    uvicorn.run(app, host=BIND_HOST, port=8766, log_level="info")
+diff --git a/tools/v021_contract_test.py b/tools/v021_contract_test.py
+index 01edafe..b0366dc 100644
+--- a/tools/v021_contract_test.py
++++ b/tools/v021_contract_test.py
+@@ -29,5 +29,5 @@ require('@mipmap/ic_launcher' in manifest, 'manifest must use adaptive launcher
+ require('@mipmap/ic_launcher_round' in manifest, 'manifest round icon missing')
+ require((root/'app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml').exists(), 'adaptive launcher icon missing')
+ require((root/'app/src/main/res/drawable/ic_notification.xml').exists(), 'notification icon missing')
+-require(('versionCode = 5' in gradle or 'versionCode = 6' in gradle or 'versionCode = 7' in gradle or 'versionCode = 8' in gradle), 'versionCode must preserve v0.2.1+ update lineage')
++require(('versionCode = 5' in gradle or 'versionCode = 6' in gradle or 'versionCode = 7' in gradle or 'versionCode = 8' in gradle or 'versionCode = 9' in gradle), 'versionCode must preserve v0.2.1+ update lineage')
+ print('PASS v021_contract_test')
+diff --git a/tools/v022_visual_contract_test.py b/tools/v022_visual_contract_test.py
+index 4639b3b..e7d607d 100644
+--- a/tools/v022_visual_contract_test.py
++++ b/tools/v022_visual_contract_test.py
+@@ -5,7 +5,7 @@ main = (root/'app/src/main/java/win/fantest/localwhisper/MainActivity.java').rea
+ overlay = (root/'app/src/main/java/win/fantest/localwhisper/OverlayService.java').read_text()
+ build = (root/'app/build.gradle.kts').read_text()
+ checks = {
+-    'v022+ update lineage': ('versionCode = 6' in build or 'versionCode = 7' in build or 'versionCode = 8' in build),
++    'v022+ update lineage': ('versionCode = 6' in build or 'versionCode = 7' in build or 'versionCode = 8' in build or 'versionCode = 9' in build),
+     'compact persistent path': 'Download/LocalWhisper/models/' in ui,
+     'model installed chip': 'modelStateChip' in ui,
+     'header settings shortcut': 'settingsShortcut' in ui,
+diff --git a/tools/v023_visual_contract_test.py b/tools/v023_visual_contract_test.py
+index 30a87fa..c625bcf 100644
+--- a/tools/v023_visual_contract_test.py
++++ b/tools/v023_visual_contract_test.py
+@@ -6,7 +6,7 @@ overlay = (root/'app/src/main/java/win/fantest/localwhisper/OverlayService.java'
+ build = (root/'app/build.gradle.kts').read_text()
+ 
+ checks = {
+-    'v023+ update lineage': ('versionCode = 7' in build or 'versionCode = 8' in build),
++    'v023+ update lineage': ('versionCode = 7' in build or 'versionCode = 8' in build or 'versionCode = 9' in build),
+     'safe area retained': 'setOnApplyWindowInsetsListener' in ui,
+     'persistent storage row': 'Persistent storage · Download/LocalWhisper/models/' in ui,
+     'developer backup block hidden': 'backupNote.setVisibility(View.GONE)' in ui,
 diff --git a/tools/v025_remote_contract_test.py b/tools/v025_remote_contract_test.py
 new file mode 100644
 index 0000000..ccda139
