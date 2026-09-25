@@ -154,6 +154,8 @@ jobs:
         run: |
           set -euo pipefail
           cd "$PROJECT"
+          echo "ACTUAL_V025_HASHES"
+          sha256sum app/src/main/java/win/fantest/localwhisper/TranscriptionService.java master-pc/remote-transcriber/requirements.txt
           cat <<'SUMS' | sha256sum -c -
           1775ebfa41bb92101e59bc08af6ce2799c511d5ccaf1014c6ef6aa9c070f4806  app/build.gradle.kts
           126b605bfdb6e7ac1f55fc6def1b8523708a14add6117f0a2d1a3bef1e5b4af2  app/src/main/AndroidManifest.xml
