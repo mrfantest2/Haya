@@ -1,0 +1,1468 @@
+﻿diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+index ab30542..390b2ab 100644
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -1,17 +1,18 @@
+-plugins {
++﻿plugins {
+     id("com.android.application")
+ }
+ 
+ android {
+     namespace = "win.fantest.localwhisper"
+     compileSdk = 35
++    ndkVersion = "27.2.12479018"
+ 
+     defaultConfig {
+         applicationId = "win.fantest.localwhisper"
+         minSdk = 26
+         targetSdk = 35
+-        versionCode = 8
+-        versionName = "0.2.4"
++        versionCode = 10
++        versionName = "0.2.6"
+ 
+         ndk {
+             abiFilters += listOf("arm64-v8a")
+@@ -27,8 +28,8 @@ android {
+                     "-DWHISPER_BUILD_SERVER=OFF",
+                     "-DGGML_OPENMP=OFF",
+                     "-DGGML_NATIVE=OFF",
+-                    "-DGGML_CPU_REPACK=ON",
+-                    "-DGGML_CPU_KLEIDIAI=ON"
++                    "-DGGML_CPU_KLEIDIAI=ON",
++                    "-DGGML_CPU_REPACK=ON"
+                 )
+             }
+         }
+@@ -58,3 +59,4 @@ android {
+         }
+     }
+ }
++
+diff --git a/app/src/main/AndroidManifest.xml b/app/src/main/AndroidManifest.xml
+index 89a63d6..5ccc67a 100644
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -2,6 +2,8 @@
+ <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+ 
+     <uses-permission android:name="android.permission.INTERNET" />
++    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
++    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING" />
+@@ -10,6 +12,7 @@
+ 
+     <application
+         android:allowBackup="false"
++        android:usesCleartextTraffic="true"
+         android:icon="@mipmap/ic_launcher"
+         android:roundIcon="@mipmap/ic_launcher_round"
+         android:label="@string/app_name"
+@@ -57,5 +60,16 @@
+         <service
+             android:name=".OverlayService"
+             android:exported="false" />
++        <service
++            android:name=".QuickTranscribeTileService"
++            android:exported="true"
++            android:icon="@drawable/ic_notification"
++            android:label="Transcribe latest WhatsApp"
++            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
++            <intent-filter>
++                <action android:name="android.service.quicksettings.action.QS_TILE" />
++            </intent-filter>
++        </service>
++
+     </application>
+ </manifest>
+diff --git a/app/src/main/java/win/fantest/localwhisper/AppPrefs.java b/app/src/main/java/win/fantest/localwhisper/AppPrefs.java
+index 041cdef..8368179 100644
+--- a/app/src/main/java/win/fantest/localwhisper/AppPrefs.java
++++ b/app/src/main/java/win/fantest/localwhisper/AppPrefs.java
+@@ -14,6 +14,11 @@ public final class AppPrefs {
+     private static final String KEY_DOWNLOAD_MODEL = "download_model";
+     private static final String KEY_OVERLAY_ENABLED = "overlay_enabled";
+     private static final String KEY_PERFORMANCE = "performance";
++    private static final String KEY_LAST_QUICK_MEDIA = "last_quick_media";
++    private static final String KEY_LIBRARY_V2_MIGRATED = "library_v2_migrated";
++    private static final String KEY_REMOTE_FIRST = "remote_first";
++
++    public static final String REMOTE_BASE_URL = "http://master-pc-1.tail46be8b.ts.net:8766";
+ 
+     public static final String OUTPUT_ORIGINAL = "original";
+     public static final String OUTPUT_ENGLISH = "english";
+@@ -27,6 +32,14 @@ public final class AppPrefs {
+ 
+     public AppPrefs(Context context) {
+         prefs = context.getSharedPreferences(NAME, Context.MODE_PRIVATE);
++        // v0.2.4 turns the transcript list into a reusable audio library. Keep audio by
++        // default so Play and Re-transcribe work after the initial transcription.
++        if (!prefs.getBoolean(KEY_LIBRARY_V2_MIGRATED, false)) {
++            prefs.edit()
++                    .putBoolean(KEY_KEEP_AUDIO, true)
++                    .putBoolean(KEY_LIBRARY_V2_MIGRATED, true)
++                    .apply();
++        }
+     }
+ 
+     public String model() { return prefs.getString(KEY_MODEL, ModelCatalog.QUALITY); }
+@@ -38,21 +51,23 @@ public final class AppPrefs {
+     public String outputMode() { return prefs.getString(KEY_OUTPUT, OUTPUT_ORIGINAL); }
+     public void setOutputMode(String value) { prefs.edit().putString(KEY_OUTPUT, value).apply(); }
+ 
++    public String performanceProfile() { return prefs.getString(KEY_PERFORMANCE, PERFORMANCE_FAST); }
++    public void setPerformanceProfile(String value) { prefs.edit().putString(KEY_PERFORMANCE, value).apply(); }
++
++    public String lastQuickMedia() { return prefs.getString(KEY_LAST_QUICK_MEDIA, ""); }
++    public void setLastQuickMedia(String value) { prefs.edit().putString(KEY_LAST_QUICK_MEDIA, value == null ? "" : value).apply(); }
++
+     public boolean timestamps() { return prefs.getBoolean(KEY_TIMESTAMPS, false); }
+     public void setTimestamps(boolean value) { prefs.edit().putBoolean(KEY_TIMESTAMPS, value).apply(); }
+ 
+-    public boolean keepAudio() { return prefs.getBoolean(KEY_KEEP_AUDIO, false); }
++    public boolean keepAudio() { return prefs.getBoolean(KEY_KEEP_AUDIO, true); }
+     public void setKeepAudio(boolean value) { prefs.edit().putBoolean(KEY_KEEP_AUDIO, value).apply(); }
+ 
+     public boolean overlayEnabled() { return prefs.getBoolean(KEY_OVERLAY_ENABLED, false); }
+     public void setOverlayEnabled(boolean value) { prefs.edit().putBoolean(KEY_OVERLAY_ENABLED, value).apply(); }
+ 
+-    public String performanceProfile() {
+-        return prefs.getString(KEY_PERFORMANCE, PERFORMANCE_FAST);
+-    }
+-    public void setPerformanceProfile(String value) {
+-        prefs.edit().putString(KEY_PERFORMANCE, value).apply();
+-    }
++    public boolean remoteFirst() { return prefs.getBoolean(KEY_REMOTE_FIRST, true); }
++    public void setRemoteFirst(boolean value) { prefs.edit().putBoolean(KEY_REMOTE_FIRST, value).apply(); }
+ 
+     public long downloadId() { return prefs.getLong(KEY_DOWNLOAD_ID, -1L); }
+     public String downloadModel() { return prefs.getString(KEY_DOWNLOAD_MODEL, ""); }
+diff --git a/app/src/main/java/win/fantest/localwhisper/MainActivity.java b/app/src/main/java/win/fantest/localwhisper/MainActivity.java
+index e12a001..145f186 100644
+--- a/app/src/main/java/win/fantest/localwhisper/MainActivity.java
++++ b/app/src/main/java/win/fantest/localwhisper/MainActivity.java
+@@ -2,27 +2,36 @@ package win.fantest.localwhisper;
+ 
+ import android.Manifest;
+ import android.app.Activity;
++import android.app.AlertDialog;
++import android.app.StatusBarManager;
+ import android.content.BroadcastReceiver;
+ import android.content.ClipData;
+ import android.content.ClipboardManager;
+ import android.content.Context;
++import android.content.ComponentName;
+ import android.content.Intent;
+ import android.content.IntentFilter;
+ import android.content.pm.PackageManager;
+ import android.graphics.Color;
++import android.graphics.drawable.Icon;
+ import android.net.Uri;
++import android.media.MediaPlayer;
+ import android.os.Build;
+ import android.os.Bundle;
+ import android.os.Handler;
+ import android.os.Looper;
+ import android.provider.Settings;
++import android.text.Editable;
++import android.text.TextWatcher;
+ import android.view.View;
+ import android.widget.Button;
+ import android.widget.LinearLayout;
+ import android.widget.TextView;
+ import android.widget.Toast;
+ 
++import java.io.File;
+ import java.text.DateFormat;
++import java.util.ArrayList;
+ import java.util.Date;
+ import java.util.List;
+ import java.util.Locale;
+@@ -33,6 +42,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
+ public final class MainActivity extends Activity {
+     private static final int REQUEST_NOTIFICATIONS = 9001;
+     private static final int REQUEST_MODEL_FILE = 9002;
++    private static final int REQUEST_MEDIA_AUDIO = 9003;
++    private static final int PAGE_SIZE = 6;
+ 
+     private TranscriptDb db;
+     private AppPrefs prefs;
+@@ -44,7 +55,9 @@ public final class MainActivity extends Activity {
+     private final Handler handler = new Handler(Looper.getMainLooper());
+     private boolean pendingOverlayPermission;
+     private boolean bindingUi;
+-    private boolean historyExpanded;
++    private int historyPageIndex;
++    private MediaPlayer mediaPlayer;
++    private Button activePlayButton;
+ 
+     private final BroadcastReceiver changed = new BroadcastReceiver() {
+         @Override public void onReceive(Context context, Intent intent) { refresh(); }
+@@ -78,6 +91,7 @@ public final class MainActivity extends Activity {
+         bindActions();
+         bindPrefs();
+         requestNotifications();
++        if (getIntent().getBooleanExtra("request_audio_permission", false)) requestAudioPermission(false);
+         refresh();
+         maintainModelAsync(false);
+         resumeInterruptedModelDownload();
+@@ -136,6 +150,7 @@ public final class MainActivity extends Activity {
+ 
+     @Override protected void onDestroy() {
+         io.shutdownNow();
++        stopPlayback();
+         super.onDestroy();
+     }
+ 
+@@ -180,10 +195,24 @@ public final class MainActivity extends Activity {
+         });
+         ui.processPending.setOnClickListener(v -> startProcessing());
+         ui.settingsShortcut.setOnClickListener(v -> ui.root.post(() -> ui.root.smoothScrollTo(0, Math.max(0, ui.settingsAnchor.getTop() - ui.dp(12)))));
+-        ui.recentSeeAll.setOnClickListener(v -> {
+-            historyExpanded = !historyExpanded;
+-            ui.recentSeeAll.setText(historyExpanded ? "Show less" : "See all");
+-            renderHistory();
++        ui.quickTileButton.setOnClickListener(v -> requestAudioPermission(true));
++        ui.historyPrev.setOnClickListener(v -> {
++            if (historyPageIndex > 0) { historyPageIndex--; renderHistory(); }
++        });
++        ui.historyNext.setOnClickListener(v -> { historyPageIndex++; renderHistory(); });
++        ui.historySearch.addTextChangedListener(new TextWatcher() {
++            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
++            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
++                historyPageIndex = 0;
++                renderHistory();
++            }
++            @Override public void afterTextChanged(Editable s) {}
++        });
++        ui.remoteFirstSwitch.setOnCheckedChangeListener((button, checked) -> {
++            if (bindingUi) return;
++            prefs.setRemoteFirst(checked);
++            updateRemoteSummary();
++            refresh();
+         });
+         ui.overlaySwitch.setOnCheckedChangeListener((button, checked) -> {
+             if (bindingUi) return;
+@@ -210,35 +239,44 @@ public final class MainActivity extends Activity {
+     private void bindPrefs() {
+         bindingUi = true;
+         ui.modelSpinner.setSelection(ModelCatalog.FAST.equals(prefs.model()) ? 1 : 0);
+-        String performance = prefs.performanceProfile();
+-        ui.performanceSpinner.setSelection(
+-                AppPrefs.PERFORMANCE_BALANCED.equals(performance) ? 1
+-                        : (AppPrefs.PERFORMANCE_ACCURATE.equals(performance) ? 2 : 0)
+-        );
+         ui.languageSpinner.setSelection("ar".equals(prefs.language()) ? 1 : ("en".equals(prefs.language()) ? 2 : 0));
+         ui.outputSpinner.setSelection(AppPrefs.OUTPUT_ENGLISH.equals(prefs.outputMode()) ? 1 : (AppPrefs.OUTPUT_BOTH.equals(prefs.outputMode()) ? 2 : 0));
++        ui.performanceSpinner.setSelection(AppPrefs.PERFORMANCE_BALANCED.equals(prefs.performanceProfile()) ? 1 : (AppPrefs.PERFORMANCE_ACCURATE.equals(prefs.performanceProfile()) ? 2 : 0));
++        ui.remoteFirstSwitch.setChecked(prefs.remoteFirst());
+         ui.timestampsSwitch.setChecked(prefs.timestamps());
+         ui.keepAudioSwitch.setChecked(prefs.keepAudio());
+         ui.overlaySwitch.setChecked(prefs.overlayEnabled() && Settings.canDrawOverlays(this));
+         bindingUi = false;
++        updateRemoteSummary();
+         updateOverlaySummary();
+     }
+ 
+     private void savePrefs() {
+         prefs.setModel(ui.modelSpinner.getSelectedItemPosition() == 1 ? ModelCatalog.FAST : ModelCatalog.QUALITY);
+-        int pp = ui.performanceSpinner.getSelectedItemPosition();
+-        prefs.setPerformanceProfile(
+-                pp == 1 ? AppPrefs.PERFORMANCE_BALANCED
+-                        : (pp == 2 ? AppPrefs.PERFORMANCE_ACCURATE : AppPrefs.PERFORMANCE_FAST)
+-        );
+         int lp = ui.languageSpinner.getSelectedItemPosition();
+         prefs.setLanguage(lp == 1 ? "ar" : (lp == 2 ? "en" : "auto"));
+         int op = ui.outputSpinner.getSelectedItemPosition();
+         prefs.setOutputMode(op == 1 ? AppPrefs.OUTPUT_ENGLISH : (op == 2 ? AppPrefs.OUTPUT_BOTH : AppPrefs.OUTPUT_ORIGINAL));
++        int dp = ui.performanceSpinner.getSelectedItemPosition();
++        prefs.setPerformanceProfile(dp == 1 ? AppPrefs.PERFORMANCE_BALANCED : (dp == 2 ? AppPrefs.PERFORMANCE_ACCURATE : AppPrefs.PERFORMANCE_FAST));
++        prefs.setRemoteFirst(ui.remoteFirstSwitch.isChecked());
+         prefs.setTimestamps(ui.timestampsSwitch.isChecked());
+         prefs.setKeepAudio(ui.keepAudioSwitch.isChecked());
+     }
+ 
++    private void updateRemoteSummary() {
++        boolean enabled = prefs.remoteFirst();
++        ui.engineBadge.setText(enabled ? "REMOTE FIRST" : "ON-DEVICE");
++        ui.routeTitle.setText(enabled ? "Master PC first" : "On-device only");
++        ui.routeMeta.setText(enabled
++                ? "RTX 2060 · Large v3 Turbo · Tailscale · local fallback"
++                : "Uses the selected local Whisper model");
++        ui.remoteSummary.setText(enabled
++                ? "Enabled · Master PC RTX 2060 over Tailscale is tried first. Local Whisper is automatic fallback."
++                : "Disabled · transcription runs only on this phone.");
++        ui.remoteSummary.setTextColor(enabled ? MainUi.ACCENT_DARK : MainUi.MUTED);
++    }
++
+     private void updateOverlaySummary() {
+         boolean enabled = prefs.overlayEnabled() && Settings.canDrawOverlays(this);
+         ui.overlaySummary.setText(enabled
+@@ -308,19 +346,14 @@ public final class MainActivity extends Activity {
+ 
+     private void startProcessing() {
+         savePrefs();
+-        if (!models.isInstalled(prefs.model())) {
+-            if (models.hasPersistentBackup(prefs.model())) {
+-                toast("Restoring the saved model first");
+-                maintainModelAsync(true);
+-            } else {
+-                toast("Download or import the selected offline model first");
+-            }
+-            return;
+-        }
+         if (db.pendingCount() == 0) {
+             toast("No pending audio");
+             return;
+         }
++        startTranscriptionService();
++    }
++
++    private void startTranscriptionService() {
+         if (prefs.overlayEnabled() && Settings.canDrawOverlays(this)) {
+             startService(new Intent(this, OverlayService.class));
+         }
+@@ -459,47 +492,65 @@ public final class MainActivity extends Activity {
+         TranscriptionStateStore.Snapshot live = new TranscriptionStateStore(this).snapshot();
+         boolean installed = models.isInstalled(prefs.model());
+         if (live.active) {
+-            ui.status.setText("● " + live.stage + (live.progress >= 0 ? " " + live.progress + "%" : "") + " · Queue " + db.pendingCount());
+-            ui.status.setTextColor(MainUi.ACCENT);
++            ui.routeTitle.setText(live.stage);
++            ui.routeMeta.setText((prefs.remoteFirst() ? "Remote-first route" : "On-device route") + " · Queue " + db.pendingCount());
++            ui.status.setText(live.progress >= 0 ? live.progress + "%" : "WORKING");
++            ui.status.setTextColor(MainUi.ACCENT_DARK);
+         } else {
+-            ui.status.setText("● " + (installed ? "Model ready" : "Model not installed") + " · Queue " + db.pendingCount());
+-            ui.status.setTextColor(installed ? MainUi.ACCENT : MainUi.MUTED);
++            if (prefs.remoteFirst()) {
++                ui.routeTitle.setText("Master PC first");
++                ui.routeMeta.setText("RTX 2060 · Large v3 Turbo · Tailscale · local fallback");
++                ui.status.setText(db.pendingCount() > 0 ? "QUEUE " + db.pendingCount() : "READY");
++                ui.status.setTextColor(MainUi.ACCENT_DARK);
++            } else {
++                ui.routeTitle.setText(installed ? "On-device ready" : "Local model required");
++                ui.routeMeta.setText(installed ? "Selected local Whisper model" : "Install or restore a fallback model");
++                ui.status.setText(db.pendingCount() > 0 ? "QUEUE " + db.pendingCount() : (installed ? "READY" : "SETUP"));
++                ui.status.setTextColor(installed ? MainUi.ACCENT_DARK : MainUi.MUTED);
++            }
+         }
+         renderHistory();
+     }
+ 
+     private void renderHistory() {
++        if (ui == null || db == null) return;
+         ui.history.removeAllViews();
+-        List<TranscriptDb.Job> jobs = db.recent(20);
++        String query = ui.historySearch.getText() == null ? "" : ui.historySearch.getText().toString().trim();
++        int total = db.countSearch(query);
++        int pages = Math.max(1, (total + PAGE_SIZE - 1) / PAGE_SIZE);
++        if (historyPageIndex >= pages) historyPageIndex = pages - 1;
++        if (historyPageIndex < 0) historyPageIndex = 0;
++        List<TranscriptDb.Job> jobs = db.search(query, PAGE_SIZE, historyPageIndex * PAGE_SIZE);
++
++        ui.recentSeeAll.setText(total + (total == 1 ? " audio" : " audios"));
++        ui.historyPage.setText("Page " + (historyPageIndex + 1) + " / " + pages);
++        ui.historyPrev.setEnabled(historyPageIndex > 0);
++        ui.historyNext.setEnabled(historyPageIndex + 1 < pages);
++
+         if (jobs.isEmpty()) {
+-            ui.recentSeeAll.setVisibility(View.GONE);
+-            TextView empty = ui.newText("No transcripts yet. Share a WhatsApp voice note to begin.", 12, false);
++            TextView empty = ui.newText(query.isEmpty()
++                    ? "No transcripts yet. Share a WhatsApp voice note to begin."
++                    : "No transcripts match your search.", 12, false);
+             empty.setTextColor(MainUi.MUTED);
+-            empty.setPadding(0, ui.dp(7), 0, ui.dp(16));
++            empty.setPadding(0, ui.dp(10), 0, ui.dp(16));
+             ui.history.addView(empty);
+             return;
+         }
+ 
+-        int limit = Math.min(jobs.size(), historyExpanded ? 20 : 2);
+-        ui.recentSeeAll.setVisibility(jobs.size() > 2 ? View.VISIBLE : View.GONE);
+-        ui.recentSeeAll.setText(historyExpanded ? "Show less" : "See all");
+-
+         DateFormat df = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT, Locale.getDefault());
+-        for (int index = 0; index < limit; index++) {
+-            TranscriptDb.Job job = jobs.get(index);
++        for (TranscriptDb.Job job : jobs) {
+             LinearLayout card = ui.newHistoryCard();
+-
+             LinearLayout titleRow = new LinearLayout(this);
+             titleRow.setOrientation(LinearLayout.HORIZONTAL);
+             titleRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+-            TextView play = ui.newText("▶", 12, true);
+-            play.setTextColor(MainUi.ACCENT);
+-            play.setGravity(android.view.Gravity.CENTER);
+-            play.setBackground(new android.graphics.drawable.GradientDrawable() {{
+-                setColor(android.graphics.Color.rgb(231, 248, 241));
+-                setShape(android.graphics.drawable.GradientDrawable.OVAL);
+-            }});
+-            titleRow.addView(play, new LinearLayout.LayoutParams(ui.dp(32), ui.dp(32)));
++
++            File audioFile = new File(job.audioPath == null ? "" : job.audioPath);
++            boolean audioReady = audioFile.isFile();
++            Button play = ui.newSmallButton(audioReady ? "▶" : "×");
++            play.setTextColor(audioReady ? MainUi.ACCENT : MainUi.MUTED);
++            play.setEnabled(audioReady);
++            play.setOnClickListener(v -> playAudio(job, play));
++            titleRow.addView(play, new LinearLayout.LayoutParams(ui.dp(42), ui.dp(36)));
+ 
+             LinearLayout titleCopy = new LinearLayout(this);
+             titleCopy.setOrientation(LinearLayout.VERTICAL);
+@@ -507,13 +558,31 @@ public final class MainActivity extends Activity {
+             title.setSingleLine(true);
+             title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+             titleCopy.addView(title);
++
+             String when = df.format(new Date(job.createdAt));
+             if (job.durationMs > 0) when += " · " + formatDuration(job.durationMs);
+             TextView meta = ui.newText(when, 10, false);
+             meta.setTextColor(MainUi.MUTED);
+             titleCopy.addView(meta);
++
++            boolean legacyModel = job.modelId == null || job.modelId.isBlank();
++            String modelId = legacyModel ? "" : job.modelId;
++            String engineText = legacyModel
++                    ? "Legacy · model not recorded"
++                    : ("master-pc".equals(job.engineSource) ? "Master PC · " : "On-device · ") + shortModelTitle(modelId) + " · " + performanceLabel(job.performanceProfile);
++            if (job.processingMs > 0) {
++                engineText += " · " + formatDuration(job.processingMs) + " processing";
++                if (job.durationMs > 0) {
++                    double rtf = (double) job.processingMs / (double) job.durationMs;
++                    engineText += String.format(Locale.US, " · %.2f× RT", rtf);
++                }
++            }
++            TextView engine = ui.newText(engineText, 10, true);
++            engine.setTextColor(MainUi.ACCENT_DARK);
++            titleCopy.addView(engine);
++
+             LinearLayout.LayoutParams copyLp = new LinearLayout.LayoutParams(0, -2, 1f);
+-            copyLp.leftMargin = ui.dp(9);
++            copyLp.leftMargin = ui.dp(8);
+             titleRow.addView(titleCopy, copyLp);
+ 
+             TextView state = ui.newText(job.status, 9, true);
+@@ -533,32 +602,54 @@ public final class MainActivity extends Activity {
+             bodyView.setMaxLines(2);
+             bodyView.setEllipsize(android.text.TextUtils.TruncateAt.END);
+             bodyView.setTextIsSelectable(true);
+-            bodyView.setPadding(ui.dp(41), ui.dp(5), 0, 0);
++            bodyView.setPadding(ui.dp(50), ui.dp(5), 0, 0);
+             card.addView(bodyView);
+ 
+-            if (TranscriptDb.DONE.equals(job.status)) {
+-                LinearLayout actions = new LinearLayout(this);
+-                actions.setOrientation(LinearLayout.HORIZONTAL);
+-                actions.setVisibility(View.GONE);
+-                Button copy = ui.newSmallButton("▣  Copy");
+-                copy.setOnClickListener(v -> copy(job.text));
+-                Button share = ui.newSmallButton("↗  Share");
+-                share.setOnClickListener(v -> share(job.text));
+-                actions.addView(copy, new LinearLayout.LayoutParams(0, ui.dp(34), 1f));
+-                LinearLayout.LayoutParams shareLp = new LinearLayout.LayoutParams(0, ui.dp(34), 1f);
+-                shareLp.leftMargin = ui.dp(7);
+-                actions.addView(share, shareLp);
+-                LinearLayout.LayoutParams actionsLp = new LinearLayout.LayoutParams(-1, -2);
+-                actionsLp.leftMargin = ui.dp(41);
+-                actionsLp.topMargin = ui.dp(6);
+-                card.addView(actions, actionsLp);
+-                card.setOnClickListener(v -> {
+-                    boolean reveal = actions.getVisibility() != View.VISIBLE;
+-                    actions.setVisibility(reveal ? View.VISIBLE : View.GONE);
+-                    bodyView.setMaxLines(reveal ? 4 : 2);
+-                    more.setText(reveal ? "⌃" : "⋮");
+-                });
+-            }
++            LinearLayout actionStack = new LinearLayout(this);
++            actionStack.setOrientation(LinearLayout.VERTICAL);
++            actionStack.setVisibility(View.GONE);
++
++            LinearLayout row1 = new LinearLayout(this);
++            row1.setOrientation(LinearLayout.HORIZONTAL);
++            Button copy = ui.newSmallButton("▣  Copy");
++            copy.setEnabled(TranscriptDb.DONE.equals(job.status));
++            copy.setOnClickListener(v -> copy(job.text));
++            Button share = ui.newSmallButton("↗  Share");
++            share.setEnabled(TranscriptDb.DONE.equals(job.status));
++            share.setOnClickListener(v -> share(job.text));
++            row1.addView(copy, new LinearLayout.LayoutParams(0, ui.dp(36), 1f));
++            LinearLayout.LayoutParams shareLp = new LinearLayout.LayoutParams(0, ui.dp(36), 1f);
++            shareLp.leftMargin = ui.dp(7);
++            row1.addView(share, shareLp);
++            actionStack.addView(row1);
++
++            LinearLayout row2 = new LinearLayout(this);
++            row2.setOrientation(LinearLayout.HORIZONTAL);
++            Button retry = ui.newSmallButton("↻  Re-transcribe");
++            retry.setEnabled(audioReady && !TranscriptDb.PROCESSING.equals(job.status));
++            retry.setOnClickListener(v -> showRetranscribePicker(job));
++            Button delete = ui.newSmallButton("⌫  Delete");
++            delete.setEnabled(!TranscriptDb.PROCESSING.equals(job.status));
++            delete.setOnClickListener(v -> confirmDelete(job));
++            row2.addView(retry, new LinearLayout.LayoutParams(0, ui.dp(36), 1f));
++            LinearLayout.LayoutParams deleteLp = new LinearLayout.LayoutParams(0, ui.dp(36), 1f);
++            deleteLp.leftMargin = ui.dp(7);
++            row2.addView(delete, deleteLp);
++            LinearLayout.LayoutParams row2Lp = new LinearLayout.LayoutParams(-1, -2);
++            row2Lp.topMargin = ui.dp(6);
++            actionStack.addView(row2, row2Lp);
++
++            LinearLayout.LayoutParams actionsLp = new LinearLayout.LayoutParams(-1, -2);
++            actionsLp.leftMargin = ui.dp(50);
++            actionsLp.topMargin = ui.dp(7);
++            card.addView(actionStack, actionsLp);
++
++            card.setOnClickListener(v -> {
++                boolean reveal = actionStack.getVisibility() != View.VISIBLE;
++                actionStack.setVisibility(reveal ? View.VISIBLE : View.GONE);
++                bodyView.setMaxLines(reveal ? 8 : 2);
++                more.setText(reveal ? "⌃" : "⋮");
++            });
+ 
+             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+             lp.topMargin = ui.dp(7);
+@@ -566,6 +657,105 @@ public final class MainActivity extends Activity {
+         }
+     }
+ 
++    private void playAudio(TranscriptDb.Job job, Button button) {
++        File file = new File(job.audioPath == null ? "" : job.audioPath);
++        if (!file.isFile()) { toast("Original audio is no longer available"); return; }
++        if (mediaPlayer != null && activePlayButton == button && mediaPlayer.isPlaying()) {
++            stopPlayback();
++            button.setText("▶");
++            return;
++        }
++        stopPlayback();
++        try {
++            mediaPlayer = new MediaPlayer();
++            activePlayButton = button;
++            mediaPlayer.setDataSource(file.getAbsolutePath());
++            mediaPlayer.setOnPreparedListener(mp -> { button.setText("■"); mp.start(); });
++            mediaPlayer.setOnCompletionListener(mp -> { button.setText("▶"); stopPlayback(); });
++            mediaPlayer.prepareAsync();
++        } catch (Exception e) {
++            stopPlayback();
++            toast("Could not play this audio");
++        }
++    }
++
++    private void stopPlayback() {
++        if (mediaPlayer != null) {
++            try { mediaPlayer.stop(); } catch (Exception ignored) {}
++            mediaPlayer.release();
++            mediaPlayer = null;
++        }
++        if (activePlayButton != null) activePlayButton.setText("▶");
++        activePlayButton = null;
++    }
++
++    private void showRetranscribePicker(TranscriptDb.Job job) {
++        if (job.audioPath == null || !new File(job.audioPath).isFile()) {
++            toast("Original audio is no longer available");
++            return;
++        }
++        ArrayList<String> labels = new ArrayList<>();
++        ArrayList<String> modelIds = new ArrayList<>();
++        ArrayList<String> modes = new ArrayList<>();
++        String[] performanceProfiles = {AppPrefs.PERFORMANCE_FAST, AppPrefs.PERFORMANCE_BALANCED, AppPrefs.PERFORMANCE_ACCURATE};
++        for (ModelCatalog.ModelInfo info : ModelCatalog.all().values()) {
++            if (!models.isInstalled(info.id)) continue;
++            for (String mode : performanceProfiles) {
++                labels.add(shortModelTitle(info.id) + " · " + performanceLabel(mode));
++                modelIds.add(info.id);
++                modes.add(mode);
++            }
++        }
++        if (labels.isEmpty()) { toast("Install a Whisper model first"); return; }
++        new AlertDialog.Builder(this)
++                .setTitle("Re-transcribe with")
++                .setItems(labels.toArray(new String[0]), (dialog, which) -> {
++                    db.insertRetranscription(job, modelIds.get(which), modes.get(which));
++                    historyPageIndex = 0;
++                    renderHistory();
++                    startTranscriptionService();
++                    toast("Re-transcription queued");
++                })
++                .setNegativeButton("Cancel", null)
++                .show();
++    }
++
++    private void confirmDelete(TranscriptDb.Job job) {
++        if (TranscriptDb.PROCESSING.equals(job.status)) {
++            toast("Wait for transcription to finish before deleting");
++            return;
++        }
++        new AlertDialog.Builder(this)
++                .setTitle("Delete transcript?")
++                .setMessage("The transcript will be removed. The audio is deleted only when no other re-transcription uses it.")
++                .setNegativeButton("Cancel", null)
++                .setPositiveButton("Delete", (dialog, which) -> {
++                    stopPlayback();
++                    String path = job.audioPath;
++                    db.delete(job.id);
++                    if (path != null && db.audioReferenceCount(path) == 0) {
++                        File f = new File(path);
++                        try {
++                            if (f.getCanonicalPath().startsWith(getFilesDir().getCanonicalPath())) f.delete();
++                        } catch (Exception ignored) {}
++                    }
++                    renderHistory();
++                    toast("Deleted");
++                })
++                .show();
++    }
++
++    private String shortModelTitle(String modelId) {
++        String title = ModelCatalog.get(modelId).title;
++        return title.replace("Quality · ", "").replace("Fast · ", "");
++    }
++
++    private static String performanceLabel(String mode) {
++        if (AppPrefs.PERFORMANCE_BALANCED.equals(mode)) return "Balanced";
++        if (AppPrefs.PERFORMANCE_ACCURATE.equals(mode)) return "Max accuracy";
++        return "Fast";
++    }
++
+     private void copy(String text) {
+         ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+         cm.setPrimaryClip(ClipData.newPlainText("Transcript", text));
+@@ -578,6 +768,52 @@ public final class MainActivity extends Activity {
+         startActivity(Intent.createChooser(s, "Share transcript"));
+     }
+ 
++    private void requestAudioPermission(boolean thenAddTile) {
++        String permission = Build.VERSION.SDK_INT >= 33
++                ? Manifest.permission.READ_MEDIA_AUDIO
++                : Manifest.permission.READ_EXTERNAL_STORAGE;
++        if (checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) {
++            if (thenAddTile) requestQuickTile();
++            return;
++        }
++        pendingQuickTileRequest = thenAddTile;
++        requestPermissions(new String[]{permission}, REQUEST_MEDIA_AUDIO);
++    }
++
++    private boolean pendingQuickTileRequest;
++
++    @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
++        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
++        if (requestCode == REQUEST_MEDIA_AUDIO) {
++            boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
++            if (granted && pendingQuickTileRequest) requestQuickTile();
++            else if (!granted) toast("Audio access is required for the latest-WhatsApp quick tile");
++            pendingQuickTileRequest = false;
++        }
++    }
++
++    private void requestQuickTile() {
++        if (Build.VERSION.SDK_INT >= 33) {
++            StatusBarManager statusBar = getSystemService(StatusBarManager.class);
++            if (statusBar == null) {
++                toast("Open Quick Settings edit and add Local Whisper");
++                return;
++            }
++            statusBar.requestAddTileService(
++                    new ComponentName(this, QuickTranscribeTileService.class),
++                    "Transcribe latest WhatsApp",
++                    Icon.createWithResource(this, R.drawable.ic_notification),
++                    getMainExecutor(),
++                    result -> runOnUiThread(() -> toast(result == StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED
++                            || result == StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED
++                            ? "Quick tile ready"
++                            : "Open Quick Settings edit and add Local Whisper"))
++            );
++        } else {
++            toast("Open Quick Settings edit and add ‘Transcribe latest WhatsApp’");
++        }
++    }
++
+     private void requestNotifications() {
+         if (Build.VERSION.SDK_INT >= 33 &&
+                 checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+diff --git a/app/src/main/java/win/fantest/localwhisper/MainUi.java b/app/src/main/java/win/fantest/localwhisper/MainUi.java
+index 82dd554..eb2c6f2 100644
+--- a/app/src/main/java/win/fantest/localwhisper/MainUi.java
++++ b/app/src/main/java/win/fantest/localwhisper/MainUi.java
+@@ -10,6 +10,7 @@ import android.view.View;
+ import android.view.WindowInsets;
+ import android.widget.ArrayAdapter;
+ import android.widget.Button;
++import android.widget.EditText;
+ import android.widget.ImageView;
+ import android.widget.LinearLayout;
+ import android.widget.ProgressBar;
+@@ -30,12 +31,17 @@ public final class MainUi {
+ 
+     public final ScrollView root;
+     public final Spinner modelSpinner;
+-    public final Spinner performanceSpinner;
+     public final Spinner languageSpinner;
+     public final Spinner outputSpinner;
++    public final Spinner performanceSpinner;
++    public final Switch remoteFirstSwitch;
+     public final Switch timestampsSwitch;
+     public final Switch keepAudioSwitch;
+     public final Switch overlaySwitch;
++    public final TextView engineBadge;
++    public final TextView routeTitle;
++    public final TextView routeMeta;
++    public final TextView remoteSummary;
+     public final TextView overlaySummary;
+     public final LinearLayout downloadCard;
+     public final TextView downloadTitle;
+@@ -50,8 +56,13 @@ public final class MainUi {
+     public final Button saveSettings;
+     public final Button processPending;
+     public final Button settingsShortcut;
++    public final Button quickTileButton;
+     public final TextView status;
+     public final TextView recentSeeAll;
++    public final EditText historySearch;
++    public final Button historyPrev;
++    public final Button historyNext;
++    public final TextView historyPage;
+     public final LinearLayout history;
+     public final LinearLayout settingsAnchor;
+ 
+@@ -82,15 +93,15 @@ public final class MainUi {
+         LinearLayout headerCopy = new LinearLayout(activity);
+         headerCopy.setOrientation(LinearLayout.VERTICAL);
+         TextView title = text("Local Whisper", 25, true);
+-        TextView subtitle = text("Private. On-device. Yours.", 11, false);
++        TextView subtitle = text("Private. Master PC + on-device fallback.", 11, false);
+         subtitle.setTextColor(MUTED);
+         headerCopy.addView(title);
+         headerCopy.addView(subtitle);
+         header.addView(headerCopy, new LinearLayout.LayoutParams(0, -2, 1f));
+ 
+         LinearLayout headerActions = horizontal();
+-        TextView badge = chip("OFFLINE", SOFT_GREEN, ACCENT_DARK);
+-        headerActions.addView(badge);
++        engineBadge = chip("MASTER PC", SOFT_GREEN, ACCENT_DARK);
++        headerActions.addView(engineBadge);
+         settingsShortcut = iconButton("⚙");
+         LinearLayout.LayoutParams gearLp = new LinearLayout.LayoutParams(dp(42), dp(42));
+         gearLp.leftMargin = dp(4);
+@@ -98,11 +109,33 @@ public final class MainUi {
+         header.addView(headerActions);
+         content.addView(header);
+ 
+-        TextView intro = text("Share a WhatsApp voice note here. Transcription stays on this phone.", 12, false);
++        TextView intro = text("Voice notes use your Master PC over Tailscale by default, with local fallback.", 12, false);
+         intro.setTextColor(MUTED);
+         intro.setPadding(dp(49), dp(2), dp(4), dp(4));
+         content.addView(intro);
+ 
++        LinearLayout routeCard = card(dp(16));
++        routeCard.setPadding(dp(14), dp(12), dp(14), dp(12));
++        LinearLayout routeRow = horizontal();
++        TextView routeIcon = text("⚡", 20, true);
++        routeIcon.setTextColor(ACCENT_DARK);
++        routeRow.addView(routeIcon, new LinearLayout.LayoutParams(dp(34), dp(34)));
++        LinearLayout routeCopy = new LinearLayout(activity);
++        routeCopy.setOrientation(LinearLayout.VERTICAL);
++        routeTitle = text("Master PC first", 15, true);
++        routeMeta = text("RTX 2060 · Large v3 Turbo · Tailscale", 11, false);
++        routeMeta.setTextColor(MUTED);
++        routeCopy.addView(routeTitle);
++        routeCopy.addView(routeMeta);
++        routeRow.addView(routeCopy, new LinearLayout.LayoutParams(0, -2, 1f));
++        status = chip("READY", SOFT_GREEN, ACCENT_DARK);
++        routeRow.addView(status);
++        routeCard.addView(routeRow);
++        content.addView(routeCard, cardLp(10));
++
++        TextView fallbackTitle = sectionTitle("Local fallback model");
++        content.addView(fallbackTitle, topLp(14));
++
+         // Model picker
+         LinearLayout modelCard = card(dp(12));
+         LinearLayout modelRow = horizontal();
+@@ -169,23 +202,8 @@ public final class MainUi {
+         content.addView(settingsTitle, topLp(16));
+ 
+         settingsAnchor = card(dp(14));
+-
+-        performanceSpinner = spinner(new String[]{
+-                "Fast · Large v3 Turbo optimized",
+-                "Balanced · difficult speech",
+-                "Maximum accuracy · beam search"
+-        });
+-        LinearLayout performanceTile = selectorTile("⚡", "Performance", performanceSpinner);
+-        settingsAnchor.addView(performanceTile, new LinearLayout.LayoutParams(-1, -2));
+-        View performanceDivider = divider();
+-        LinearLayout.LayoutParams performanceDividerLp = new LinearLayout.LayoutParams(-1, dp(1));
+-        performanceDividerLp.topMargin = dp(8);
+-        performanceDividerLp.bottomMargin = dp(8);
+-        performanceDivider.setLayoutParams(performanceDividerLp);
+-        settingsAnchor.addView(performanceDivider);
+-
+         languageSpinner = spinner(new String[]{"Auto detect", "Arabic", "English"});
+-        outputSpinner = spinner(new String[]{"Original language", "English translation", "Original + English"});
++        outputSpinner = spinner(new String[]{"Original language", "English translation", "Original + English · slower (2 passes)"});
+         LinearLayout selectorTiles = horizontal();
+         LinearLayout languageTile = selectorTile("◎", "Language", languageSpinner);
+         LinearLayout outputTile = selectorTile("▤", "Output", outputSpinner);
+@@ -194,15 +212,33 @@ public final class MainUi {
+         outputTileLp.leftMargin = dp(8);
+         selectorTiles.addView(outputTile, outputTileLp);
+         settingsAnchor.addView(selectorTiles);
++
++        performanceSpinner = spinner(new String[]{
++                "Fast · Large v3 Turbo optimized",
++                "Balanced · difficult speech",
++                "Maximum accuracy · beam search"
++        });
++        LinearLayout decodeTile = selectorTile("⚡", "Performance", performanceSpinner);
++        LinearLayout.LayoutParams decodeLp = new LinearLayout.LayoutParams(-1, -2);
++        decodeLp.topMargin = dp(8);
++        settingsAnchor.addView(decodeTile, decodeLp);
++
+         LinearLayout.LayoutParams settingsDividerLp = new LinearLayout.LayoutParams(-1, dp(1));
+         settingsDividerLp.topMargin = dp(8);
+         View settingsDivider = divider();
+         settingsDivider.setLayoutParams(settingsDividerLp);
+         settingsAnchor.addView(settingsDivider);
+ 
++        remoteFirstSwitch = toggle("☁  Master PC transcription first");
++        remoteSummary = text("Default · RTX 2060 Large v3 Turbo over encrypted Tailscale. Falls back on-device if unreachable.", 11, false);
++        remoteSummary.setTextColor(ACCENT_DARK);
++        remoteSummary.setPadding(dp(8), dp(2), dp(8), dp(5));
+         timestampsSwitch = toggle("◷  Include timestamps");
+-        keepAudioSwitch = toggle("♪  Keep imported audio");
++        keepAudioSwitch = toggle("♪  Keep audio for Play / Re-transcribe");
+         overlaySwitch = toggle("▣  Stay in chat floating transcript");
++        settingsAnchor.addView(remoteFirstSwitch);
++        settingsAnchor.addView(remoteSummary);
++        settingsAnchor.addView(divider());
+         settingsAnchor.addView(timestampsSwitch);
+         settingsAnchor.addView(divider());
+         settingsAnchor.addView(keepAudioSwitch);
+@@ -217,25 +253,46 @@ public final class MainUi {
+ 
+         saveSettings = primaryButton("⚙  Save settings");
+         content.addView(saveSettings, fullButtonLp(8, 44));
+-        processPending = secondaryGreenButton("▶  Process pending audio");
+-        content.addView(processPending, fullButtonLp(7, 44));
+ 
+-        status = text("● Model not installed · Queue 0", 12, true);
+-        status.setTextColor(MUTED);
+-        status.setPadding(dp(3), dp(8), 0, dp(2));
+-        content.addView(status);
++        LinearLayout quickActions = horizontal();
++        processPending = secondaryGreenButton("▶  Process queue");
++        quickTileButton = secondaryButton("⚡  WhatsApp tile");
++        quickActions.addView(processPending, new LinearLayout.LayoutParams(0, dp(44), 1f));
++        LinearLayout.LayoutParams quickTileLp = new LinearLayout.LayoutParams(0, dp(44), 1f);
++        quickTileLp.leftMargin = dp(8);
++        quickActions.addView(quickTileButton, quickTileLp);
++        content.addView(quickActions, topLp(7));
+ 
+         LinearLayout recentTitle = horizontal();
+-        recentTitle.addView(sectionTitle("Recent transcripts"), new LinearLayout.LayoutParams(0, -2, 1f));
+-        recentSeeAll = text("See all", 12, true);
++        recentTitle.addView(sectionTitle("Transcripts"), new LinearLayout.LayoutParams(0, -2, 1f));
++        recentSeeAll = text("Audio library", 11, true);
+         recentSeeAll.setTextColor(ACCENT_DARK);
+         recentSeeAll.setPadding(dp(10), dp(8), 0, dp(8));
+         recentTitle.addView(recentSeeAll);
+         content.addView(recentTitle, topLp(8));
+ 
++        historySearch = new EditText(activity);
++        historySearch.setHint("Search transcript, model, engine or language");
++        historySearch.setSingleLine(true);
++        historySearch.setTextSize(13);
++        historySearch.setPadding(dp(12), 0, dp(12), 0);
++        historySearch.setBackground(round(Color.WHITE, 14, BORDER, 1));
++        content.addView(historySearch, fullButtonLp(5, 44));
++
+         history = new LinearLayout(activity);
+         history.setOrientation(LinearLayout.VERTICAL);
+         content.addView(history);
++
++        LinearLayout pager = horizontal();
++        historyPrev = secondaryButton("‹  Previous");
++        historyPage = text("Page 1 / 1", 11, true);
++        historyPage.setTextColor(MUTED);
++        historyPage.setGravity(Gravity.CENTER);
++        historyNext = secondaryButton("Next  ›");
++        pager.addView(historyPrev, new LinearLayout.LayoutParams(0, dp(40), 1f));
++        pager.addView(historyPage, new LinearLayout.LayoutParams(0, dp(40), 1f));
++        pager.addView(historyNext, new LinearLayout.LayoutParams(0, dp(40), 1f));
++        content.addView(pager, topLp(8));
+     }
+ 
+     public LinearLayout newHistoryCard() {
+diff --git a/app/src/main/java/win/fantest/localwhisper/TranscriptDb.java b/app/src/main/java/win/fantest/localwhisper/TranscriptDb.java
+index 27ca6c6..77b94d2 100644
+--- a/app/src/main/java/win/fantest/localwhisper/TranscriptDb.java
++++ b/app/src/main/java/win/fantest/localwhisper/TranscriptDb.java
+@@ -11,7 +11,7 @@ import java.util.List;
+ 
+ public final class TranscriptDb extends SQLiteOpenHelper {
+     private static final String DB_NAME = "transcripts.db";
+-    private static final int DB_VERSION = 1;
++    private static final int DB_VERSION = 3;
+ 
+     public static final String PENDING = "PENDING";
+     public static final String PROCESSING = "PROCESSING";
+@@ -28,6 +28,11 @@ public final class TranscriptDb extends SQLiteOpenHelper {
+         public long createdAt;
+         public String error;
+         public long durationMs;
++        public String modelId;
++        public String performanceProfile;
++        public long processingMs;
++        public long parentId;
++        public String engineSource;
+     }
+ 
+     public TranscriptDb(Context context) {
+@@ -46,24 +51,52 @@ public final class TranscriptDb extends SQLiteOpenHelper {
+                         "status TEXT NOT NULL," +
+                         "created_at INTEGER NOT NULL," +
+                         "error TEXT NOT NULL DEFAULT ''," +
+-                        "duration_ms INTEGER NOT NULL DEFAULT 0" +
++                        "duration_ms INTEGER NOT NULL DEFAULT 0," +
++                        "model_id TEXT NOT NULL DEFAULT ''," +
++                        "performance_profile TEXT NOT NULL DEFAULT 'fast'," +
++                        "processing_ms INTEGER NOT NULL DEFAULT 0," +
++                        "parent_id INTEGER NOT NULL DEFAULT 0," +
++                        "engine_source TEXT NOT NULL DEFAULT 'device'" +
+                         ")"
+         );
+         db.execSQL("CREATE INDEX idx_transcript_status_id ON transcript(status, id)");
++        db.execSQL("CREATE INDEX idx_transcript_created_id ON transcript(created_at, id)");
+     }
+ 
+     @Override
+-    public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {}
++    public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
++        if (oldVersion < 2) {
++            db.execSQL("ALTER TABLE transcript ADD COLUMN model_id TEXT NOT NULL DEFAULT ''");
++            db.execSQL("ALTER TABLE transcript ADD COLUMN performance_profile TEXT NOT NULL DEFAULT 'fast'");
++            db.execSQL("ALTER TABLE transcript ADD COLUMN processing_ms INTEGER NOT NULL DEFAULT 0");
++            db.execSQL("ALTER TABLE transcript ADD COLUMN parent_id INTEGER NOT NULL DEFAULT 0");
++            db.execSQL("CREATE INDEX IF NOT EXISTS idx_transcript_created_id ON transcript(created_at, id)");
++        }
++        if (oldVersion < 3) {
++            db.execSQL("ALTER TABLE transcript ADD COLUMN engine_source TEXT NOT NULL DEFAULT 'device'");
++        }
++    }
+ 
+     public long insertPending(String name, String audioPath) {
++        return insertPending(name, audioPath, "", AppPrefs.PERFORMANCE_FAST, 0L);
++    }
++
++    public long insertPending(String name, String audioPath, String modelId, String performanceProfile, long parentId) {
+         ContentValues values = new ContentValues();
+         values.put("name", name);
+         values.put("audio_path", audioPath);
+         values.put("status", PENDING);
+         values.put("created_at", System.currentTimeMillis());
++        values.put("model_id", modelId == null ? "" : modelId);
++        values.put("performance_profile", performanceProfile == null ? AppPrefs.PERFORMANCE_FAST : performanceProfile);
++        values.put("parent_id", parentId);
+         return getWritableDatabase().insertOrThrow("transcript", null, values);
+     }
+ 
++    public long insertRetranscription(Job source, String modelId, String performanceProfile) {
++        return insertPending(source.name, source.audioPath, modelId, performanceProfile, source.id);
++    }
++
+     public void resetInterrupted() {
+         ContentValues values = new ContentValues();
+         values.put("status", PENDING);
+@@ -72,14 +105,15 @@ public final class TranscriptDb extends SQLiteOpenHelper {
+ 
+     public Job nextPending() {
+         try (Cursor c = getReadableDatabase().query(
+-                "transcript",
+-                null,
+-                "status=?",
+-                new String[]{PENDING},
+-                null,
+-                null,
+-                "id ASC",
+-                "1"
++                "transcript", null, "status=?", new String[]{PENDING}, null, null, "id ASC", "1"
++        )) {
++            return c.moveToFirst() ? fromCursor(c) : null;
++        }
++    }
++
++    public Job get(long id) {
++        try (Cursor c = getReadableDatabase().query(
++                "transcript", null, "id=?", new String[]{String.valueOf(id)}, null, null, null, "1"
+         )) {
+             return c.moveToFirst() ? fromCursor(c) : null;
+         }
+@@ -94,22 +128,39 @@ public final class TranscriptDb extends SQLiteOpenHelper {
+         }
+     }
+ 
++    public void markProcessing(long id, String modelId, String performanceProfile) {
++        ContentValues values = new ContentValues();
++        values.put("status", PROCESSING);
++        values.put("model_id", modelId == null ? "" : modelId);
++        values.put("performance_profile", performanceProfile == null ? AppPrefs.PERFORMANCE_FAST : performanceProfile);
++        getWritableDatabase().update("transcript", values, "id=?", new String[]{String.valueOf(id)});
++    }
++
+     public void markProcessing(long id) {
+         ContentValues values = new ContentValues();
+         values.put("status", PROCESSING);
+         getWritableDatabase().update("transcript", values, "id=?", new String[]{String.valueOf(id)});
+     }
+ 
+-    public void markDone(long id, String text, String language, long durationMs) {
++    public void markDone(long id, String text, String language, long durationMs,
++                         String modelId, String performanceProfile, long processingMs, String engineSource) {
+         ContentValues values = new ContentValues();
+         values.put("status", DONE);
+         values.put("text", text == null ? "" : text);
+         values.put("language", language == null ? "" : language);
+         values.put("duration_ms", durationMs);
++        values.put("model_id", modelId == null ? "" : modelId);
++        values.put("performance_profile", performanceProfile == null ? AppPrefs.PERFORMANCE_FAST : performanceProfile);
++        values.put("processing_ms", processingMs);
++        values.put("engine_source", engineSource == null ? "device" : engineSource);
+         values.put("error", "");
+         getWritableDatabase().update("transcript", values, "id=?", new String[]{String.valueOf(id)});
+     }
+ 
++    public void markDone(long id, String text, String language, long durationMs) {
++        markDone(id, text, language, durationMs, "", AppPrefs.PERFORMANCE_FAST, 0L, "device");
++    }
++
+     public void markFailed(long id, String error) {
+         ContentValues values = new ContentValues();
+         values.put("status", FAILED);
+@@ -118,22 +169,51 @@ public final class TranscriptDb extends SQLiteOpenHelper {
+     }
+ 
+     public List<Job> recent(int limit) {
++        return search("", limit, 0);
++    }
++
++    public List<Job> search(String query, int limit, int offset) {
+         List<Job> jobs = new ArrayList<>();
++        String normalized = query == null ? "" : query.trim();
++        String selection = null;
++        String[] args = null;
++        if (!normalized.isEmpty()) {
++            String like = "%" + normalized + "%";
++            selection = "name LIKE ? OR text LIKE ? OR language LIKE ? OR model_id LIKE ? OR performance_profile LIKE ? OR engine_source LIKE ?";
++            args = new String[]{like, like, like, like, like, like};
++        }
+         try (Cursor c = getReadableDatabase().query(
+-                "transcript",
+-                null,
+-                null,
+-                null,
+-                null,
+-                null,
+-                "id DESC",
+-                String.valueOf(limit)
++                "transcript", null, selection, args, null, null,
++                "id DESC", limit + " OFFSET " + Math.max(0, offset)
+         )) {
+             while (c.moveToNext()) jobs.add(fromCursor(c));
+         }
+         return jobs;
+     }
+ 
++    public int countSearch(String query) {
++        String normalized = query == null ? "" : query.trim();
++        String sql = "SELECT COUNT(*) FROM transcript";
++        String[] args = null;
++        if (!normalized.isEmpty()) {
++            sql += " WHERE name LIKE ? OR text LIKE ? OR language LIKE ? OR model_id LIKE ? OR performance_profile LIKE ? OR engine_source LIKE ?";
++            String like = "%" + normalized + "%";
++            args = new String[]{like, like, like, like, like, like};
++        }
++        try (Cursor c = getReadableDatabase().rawQuery(sql, args)) {
++            return c.moveToFirst() ? c.getInt(0) : 0;
++        }
++    }
++
++    public int audioReferenceCount(String audioPath) {
++        try (Cursor c = getReadableDatabase().rawQuery(
++                "SELECT COUNT(*) FROM transcript WHERE audio_path=?",
++                new String[]{audioPath}
++        )) {
++            return c.moveToFirst() ? c.getInt(0) : 0;
++        }
++    }
++
+     public void delete(long id) {
+         getWritableDatabase().delete("transcript", "id=?", new String[]{String.valueOf(id)});
+     }
+@@ -149,6 +229,16 @@ public final class TranscriptDb extends SQLiteOpenHelper {
+         job.createdAt = c.getLong(c.getColumnIndexOrThrow("created_at"));
+         job.error = c.getString(c.getColumnIndexOrThrow("error"));
+         job.durationMs = c.getLong(c.getColumnIndexOrThrow("duration_ms"));
++        int modelIndex = c.getColumnIndex("model_id");
++        job.modelId = modelIndex >= 0 ? c.getString(modelIndex) : "";
++        int decodeIndex = c.getColumnIndex("performance_profile");
++        job.performanceProfile = decodeIndex >= 0 ? c.getString(decodeIndex) : AppPrefs.PERFORMANCE_FAST;
++        int processingIndex = c.getColumnIndex("processing_ms");
++        job.processingMs = processingIndex >= 0 ? c.getLong(processingIndex) : 0L;
++        int parentIndex = c.getColumnIndex("parent_id");
++        job.parentId = parentIndex >= 0 ? c.getLong(parentIndex) : 0L;
++        int engineIndex = c.getColumnIndex("engine_source");
++        job.engineSource = engineIndex >= 0 ? c.getString(engineIndex) : "device";
+         return job;
+     }
+ }
+diff --git a/app/src/main/java/win/fantest/localwhisper/TranscriptionService.java b/app/src/main/java/win/fantest/localwhisper/TranscriptionService.java
+index a3a81b5..1ef40be 100644
+--- a/app/src/main/java/win/fantest/localwhisper/TranscriptionService.java
++++ b/app/src/main/java/win/fantest/localwhisper/TranscriptionService.java
+@@ -10,7 +10,6 @@ import android.os.Build;
+ import android.os.IBinder;
+ 
+ import java.io.File;
+-import java.util.Locale;
+ import java.util.concurrent.ExecutorService;
+ import java.util.concurrent.Executors;
+ import java.util.concurrent.atomic.AtomicBoolean;
+@@ -29,12 +28,6 @@ public final class TranscriptionService extends Service {
+     private static final String CHANNEL_ID = "transcription";
+     private static final int NOTIFICATION_ID = 4101;
+ 
+-    // Keep the heavy Whisper model resident while the app process stays alive.
+-    // Sharing several voice notes no longer reloads ~547 MB of model weights each time.
+-    private static final Object ENGINE_LOCK = new Object();
+-    private static long cachedEngine;
+-    private static String cachedModelPath = "";
+-
+     private ExecutorService executor;
+     private final AtomicBoolean draining = new AtomicBoolean(false);
+     private TranscriptionStateStore liveState;
+@@ -49,13 +42,14 @@ public final class TranscriptionService extends Service {
+ 
+     @Override
+     public int onStartCommand(Intent intent, int flags, int startId) {
+-        startForegroundCompat(notification("Preparing local transcription…", 0, 0));
++        startForegroundCompat(notification("Preparing transcription…", 0, 0));
+         if (draining.compareAndSet(false, true)) {
+             executor.submit(() -> {
+                 try {
+                     drainQueue();
+                 } finally {
+                     draining.set(false);
++                    WhisperEngineCache.releaseLater();
+                     stopForeground(STOP_FOREGROUND_REMOVE);
+                     stopSelfResult(startId);
+                 }
+@@ -70,112 +64,152 @@ public final class TranscriptionService extends Service {
+         AppPrefs prefs = new AppPrefs(this);
+         ModelManager modelManager = new ModelManager(this);
+ 
+-        String modelId = prefs.model();
+-        File model = modelManager.modelFile(modelId);
+-        if (!modelManager.isInstalled(modelId)) {
+-            notifyChanged();
+-            return;
+-        }
+-
+-        TranscriptDb.Job firstPending = db.nextPending();
+-        if (firstPending == null) {
+-            notifyChanged();
+-            return;
+-        }
+-        report(firstPending, "Loading Whisper model", -1, "", db.pendingCount(), true);
+-
+-        long engine = acquireEngine(model);
+-        if (engine == 0L) {
+-            failAllPending(db, "Could not load Whisper model");
+-            notifyChanged();
+-            return;
+-        }
++        TranscriptDb.Job job;
++        while ((job = db.nextPending()) != null) {
++            String modelId = job.modelId == null || job.modelId.isBlank() ? prefs.model() : job.modelId;
++            String performanceProfile = normalizePerformanceProfile(job.performanceProfile, prefs.performanceProfile());
++            File audio = new File(job.audioPath == null ? "" : job.audioPath);
++            int remaining = db.pendingCount();
++
++            if (!audio.isFile()) {
++                String error = "Original audio is no longer available";
++                db.markFailed(job.id, error);
++                liveState.fail(job.id, job.name, error);
++                sendProgress(job, "Failed", -1, error);
++                notifyChanged();
++                continue;
++            }
+ 
+-        try {
+-            TranscriptDb.Job job;
+-            while ((job = db.nextPending()) != null) {
+-                db.markProcessing(job.id);
+-                int remaining = db.pendingCount();
+-                report(job, "Decoding voice note", -1, "", remaining, true);
++            db.markProcessing(job.id, modelId, performanceProfile);
++            long started = System.currentTimeMillis();
+ 
+-                File audio = new File(job.audioPath);
+-                long started = System.currentTimeMillis();
+-                long audioDurationMs = 0L;
++            if (prefs.remoteFirst()) {
+                 try {
+-                    AudioDecoder.DecodedAudio decoded = AudioDecoder.decode(audio);
+-                    audioDurationMs = decoded.durationMs;
+-                    report(job, "Preparing transcription", -1, "", remaining, true);
+-
+-                    String language = prefs.language();
+-                    boolean timestamps = prefs.timestamps();
+-                    String mode = prefs.outputMode();
+-                    String performance = prefs.performanceProfile();
+-                    String result;
+-                    String detected;
+-
+-                    if (AppPrefs.OUTPUT_ENGLISH.equals(mode)) {
+-                        ProgressEmitter emitter = new ProgressEmitter(job, "Translating to English", 0, 1, remaining);
+-                        result = WhisperNative.transcribe(engine, decoded.samples, language, true, timestamps, performance, emitter);
+-                        detected = WhisperNative.detectedLanguage(engine);
+-                    } else if (AppPrefs.OUTPUT_BOTH.equals(mode)) {
+-                        ProgressEmitter originalEmitter = new ProgressEmitter(job, "Transcribing original", 0, 2, remaining);
+-                        String original = WhisperNative.transcribe(engine, decoded.samples, language, false, timestamps, performance, originalEmitter);
+-                        detected = WhisperNative.detectedLanguage(engine);
+-                        ProgressEmitter englishEmitter = new ProgressEmitter(job, "Translating to English", 1, 2, remaining);
+-                        String english = WhisperNative.transcribe(engine, decoded.samples, language, true, timestamps, performance, englishEmitter);
+-                        result = "Original:\n" + original + "\n\nEnglish:\n" + english;
+-                    } else {
+-                        ProgressEmitter emitter = new ProgressEmitter(job, "Transcribing", 0, 1, remaining);
+-                        result = WhisperNative.transcribe(engine, decoded.samples, language, false, timestamps, performance, emitter);
+-                        detected = WhisperNative.detectedLanguage(engine);
++                    report(job, "Sending to Master PC", 5, "", remaining, true);
++                    RemoteTranscriptionClient.Result remote = RemoteTranscriptionClient.transcribe(
++                            audio,
++                            prefs.language(),
++                            prefs.outputMode(),
++                            prefs.timestamps(),
++                            performanceProfile,
++                            modelId
++                    );
++                    long elapsed = Math.max(1L, System.currentTimeMillis() - started);
++                    String finalModelId = remote.modelId == null || remote.modelId.isBlank() ? modelId : remote.modelId;
++                    db.markDone(
++                            job.id,
++                            remote.text,
++                            remote.language,
++                            remote.durationMs,
++                            finalModelId,
++                            performanceProfile,
++                            elapsed,
++                            "master-pc"
++                    );
++                    liveState.complete(job.id, job.name, remote.text);
++                    sendProgress(job, "Complete · Master PC", 100, remote.text);
++                    if (!prefs.keepAudio() && db.audioReferenceCount(job.audioPath) <= 1) audio.delete();
++                    String speed = remote.durationMs > 0L
++                            ? String.format(java.util.Locale.US, " · %.2fx realtime", (double) remote.durationMs / (double) elapsed)
++                            : "";
++                    updateNotification("Finished on Master PC · " + job.name + " · " + elapsed / 1000L + "s" + speed, 100, 100);
++                    notifyChanged();
++                    continue;
++                } catch (Throwable remoteError) {
++                    String reason = readableError(remoteError);
++                    report(job, "Master PC unavailable · local fallback", -1, reason, remaining, true);
++                    if (!modelManager.isInstalled(modelId)) {
++                        String error = "Master PC unavailable: " + reason + " · local model not installed";
++                        db.markFailed(job.id, error);
++                        liveState.fail(job.id, job.name, error);
++                        sendProgress(job, "Failed", -1, error);
++                        notifyChanged();
++                        continue;
+                     }
++                }
++            }
+ 
+-                    if (result == null || result.trim().isEmpty()) {
+-                        throw new IllegalStateException("Whisper returned no text");
+-                    }
++            File model = modelManager.modelFile(modelId);
++            if (!modelManager.isInstalled(modelId)) {
++                String error = "Model not installed: " + ModelCatalog.get(modelId).title;
++                db.markFailed(job.id, error);
++                liveState.fail(job.id, job.name, error);
++                sendProgress(job, "Failed", -1, error);
++                notifyChanged();
++                continue;
++            }
+ 
+-                    String finalText = result.trim();
+-                    db.markDone(job.id, finalText, detected, decoded.durationMs);
+-                    liveState.complete(job.id, job.name, finalText);
+-                    sendProgress(job, "Complete", 100, finalText);
+-                    if (!prefs.keepAudio()) audio.delete();
+-                } catch (Throwable t) {
+-                    String error = readableError(t);
+-                    db.markFailed(job.id, error);
+-                    liveState.fail(job.id, job.name, error);
+-                    sendProgress(job, "Failed", -1, error);
++            report(job, "Loading Whisper model locally · " + ModelCatalog.get(modelId).title, -1, "", remaining, true);
++            long engine = WhisperEngineCache.acquire(model.getAbsolutePath());
++            if (engine == 0L) {
++                String error = "Could not load local Whisper model";
++                db.markFailed(job.id, error);
++                liveState.fail(job.id, job.name, error);
++                sendProgress(job, "Failed", -1, error);
++                notifyChanged();
++                continue;
++            }
++
++            report(job, "Decoding voice note locally", -1, "", remaining, true);
++            try {
++                AudioDecoder.DecodedAudio decoded = AudioDecoder.decode(audio);
++                report(job, "Preparing transcription locally", -1, "", remaining, true);
++
++                String language = prefs.language();
++                boolean timestamps = prefs.timestamps();
++                String outputMode = prefs.outputMode();
++                String result;
++                String detected;
++
++                if (AppPrefs.OUTPUT_ENGLISH.equals(outputMode)) {
++                    ProgressEmitter emitter = new ProgressEmitter(job, "Translating locally", 0, 1, remaining);
++                    result = WhisperNative.transcribe(engine, decoded.samples, language, true, timestamps, performanceProfile, emitter);
++                    detected = WhisperNative.detectedLanguage(engine);
++                } else if (AppPrefs.OUTPUT_BOTH.equals(outputMode)) {
++                    ProgressEmitter originalEmitter = new ProgressEmitter(job, "Transcribing locally", 0, 2, remaining);
++                    String original = WhisperNative.transcribe(engine, decoded.samples, language, false, timestamps, performanceProfile, originalEmitter);
++                    detected = WhisperNative.detectedLanguage(engine);
++                    ProgressEmitter englishEmitter = new ProgressEmitter(job, "Translating locally", 1, 2, remaining);
++                    String english = WhisperNative.transcribe(engine, decoded.samples, language, true, timestamps, performanceProfile, englishEmitter);
++                    result = "Original:\n" + original + "\n\nEnglish:\n" + english;
++                } else {
++                    ProgressEmitter emitter = new ProgressEmitter(job, "Transcribing locally", 0, 1, remaining);
++                    result = WhisperNative.transcribe(engine, decoded.samples, language, false, timestamps, performanceProfile, emitter);
++                    detected = WhisperNative.detectedLanguage(engine);
++                }
++
++                if (result == null || result.trim().isEmpty()) {
++                    throw new IllegalStateException("Whisper returned no text");
+                 }
+ 
+                 long elapsed = Math.max(1L, System.currentTimeMillis() - started);
+-                String speed = audioDurationMs > 0L
+-                        ? String.format(Locale.US, " · %.2fx realtime", (double) audioDurationMs / (double) elapsed)
++                String finalText = result.trim();
++                db.markDone(job.id, finalText, detected, decoded.durationMs, modelId, performanceProfile, elapsed, "device");
++                liveState.complete(job.id, job.name, finalText);
++                sendProgress(job, "Complete · on-device", 100, finalText);
++                if (!prefs.keepAudio() && db.audioReferenceCount(job.audioPath) <= 1) audio.delete();
++                String speed = decoded.durationMs > 0L
++                        ? String.format(java.util.Locale.US, " · %.2fx realtime", (double) decoded.durationMs / (double) elapsed)
+                         : "";
+-                updateNotification("Finished " + job.name + " · " + elapsed / 1000L + "s" + speed, 100, 100);
+-                notifyChanged();
++                updateNotification("Finished on-device · " + job.name + " · " + elapsed / 1000L + "s" + speed, 100, 100);
++            } catch (Throwable t) {
++                String error = readableError(t);
++                db.markFailed(job.id, error);
++                liveState.fail(job.id, job.name, error);
++                sendProgress(job, "Failed", -1, error);
+             }
+-        } finally {
+-            // Intentionally keep the native engine cached for the next shared note.
+             notifyChanged();
+         }
++        notifyChanged();
+     }
+ 
+-    private static long acquireEngine(File model) {
+-        String path = model.getAbsolutePath();
+-        synchronized (ENGINE_LOCK) {
+-            if (cachedEngine != 0L && path.equals(cachedModelPath)) {
+-                return cachedEngine;
+-            }
+-            if (cachedEngine != 0L) {
+-                WhisperNative.destroy(cachedEngine);
+-                cachedEngine = 0L;
+-                cachedModelPath = "";
+-            }
+-            cachedEngine = WhisperNative.create(path);
+-            if (cachedEngine != 0L) cachedModelPath = path;
+-            return cachedEngine;
+-        }
++    private static String normalizePerformanceProfile(String jobMode, String fallback) {
++        String value = jobMode == null || jobMode.isBlank() ? fallback : jobMode;
++        if (AppPrefs.PERFORMANCE_BALANCED.equals(value) || AppPrefs.PERFORMANCE_ACCURATE.equals(value)) return value;
++        return AppPrefs.PERFORMANCE_FAST;
+     }
+ 
++
+     private final class ProgressEmitter implements WhisperNative.ProgressListener {
+         private final TranscriptDb.Job job;
+         private final String stage;
+@@ -223,15 +257,6 @@ public final class TranscriptionService extends Service {
+         sendBroadcast(i);
+     }
+ 
+-    private void failAllPending(TranscriptDb db, String message) {
+-        TranscriptDb.Job job;
+-        while ((job = db.nextPending()) != null) {
+-            db.markFailed(job.id, message);
+-            liveState.fail(job.id, job.name, message);
+-            sendProgress(job, "Failed", -1, message);
+-        }
+-    }
+-
+     private static String readableError(Throwable t) {
+         String message = t.getMessage();
+         if (message == null || message.trim().isEmpty()) message = t.getClass().getSimpleName();
+@@ -250,8 +275,7 @@ public final class TranscriptionService extends Service {
+                     NotificationManager.IMPORTANCE_LOW
+             );
+             channel.setDescription(getString(R.string.channel_description));
+-            ((NotificationManager) getSystemService(NOTIFICATION_SERVICE))
+-                    .createNotificationChannel(channel);
++            ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).createNotificationChannel(channel);
+         }
+     }
+ 
+@@ -268,7 +292,6 @@ public final class TranscriptionService extends Service {
+ 
+         if (max > 0) builder.setProgress(max, Math.max(0, Math.min(max, progress)), false);
+         else builder.setProgress(0, 0, true);
+-
+         return builder.build();
+     }
+ 
+@@ -279,24 +302,16 @@ public final class TranscriptionService extends Service {
+ 
+     private void startForegroundCompat(Notification notification) {
+         if (Build.VERSION.SDK_INT >= 35) {
+-            startForeground(
+-                    NOTIFICATION_ID,
+-                    notification,
+-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING
+-            );
++            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING);
+         } else {
+             startForeground(NOTIFICATION_ID, notification);
+         }
+     }
+ 
+-    @Override
+-    public void onDestroy() {
++    @Override public void onDestroy() {
+         if (executor != null) executor.shutdownNow();
+         super.onDestroy();
+     }
+ 
+-    @Override
+-    public IBinder onBind(Intent intent) {
+-        return null;
+-    }
++    @Override public IBinder onBind(Intent intent) { return null; }
+ }
