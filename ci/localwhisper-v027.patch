@@ -1,0 +1,439 @@
+﻿diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+index 390b2ab..8594691 100644
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -11,8 +11,8 @@ android {
+         applicationId = "win.fantest.localwhisper"
+         minSdk = 26
+         targetSdk = 35
+-        versionCode = 10
+-        versionName = "0.2.6"
++        versionCode = 11
++        versionName = "0.2.7"
+ 
+         ndk {
+             abiFilters += listOf("arm64-v8a")
+diff --git a/app/src/main/java/win/fantest/localwhisper/MainActivity.java b/app/src/main/java/win/fantest/localwhisper/MainActivity.java
+index 145f186..ab22735 100644
+--- a/app/src/main/java/win/fantest/localwhisper/MainActivity.java
++++ b/app/src/main/java/win/fantest/localwhisper/MainActivity.java
+@@ -266,14 +266,14 @@ public final class MainActivity extends Activity {
+ 
+     private void updateRemoteSummary() {
+         boolean enabled = prefs.remoteFirst();
+-        ui.engineBadge.setText(enabled ? "REMOTE FIRST" : "ON-DEVICE");
+-        ui.routeTitle.setText(enabled ? "Master PC first" : "On-device only");
++        ui.engineBadge.setText(enabled ? "API FIRST" : "PHONE ONLY");
++        ui.routeTitle.setText(enabled ? "Master PC API" : "This phone only");
+         ui.routeMeta.setText(enabled
+-                ? "RTX 2060 · Large v3 Turbo · Tailscale · local fallback"
+-                : "Uses the selected local Whisper model");
++                ? "Private Tailscale API · RTX 2060 · Large v3 Turbo · phone fallback"
++                : "No upload · uses the selected local Whisper model");
+         ui.remoteSummary.setText(enabled
+-                ? "Enabled · Master PC RTX 2060 over Tailscale is tried first. Local Whisper is automatic fallback."
+-                : "Disabled · transcription runs only on this phone.");
++                ? "Recommended · Master PC API is tried first. If it is unavailable, this phone is the automatic fallback."
++                : "Phone only · audio never leaves this device.");
+         ui.remoteSummary.setTextColor(enabled ? MainUi.ACCENT_DARK : MainUi.MUTED);
+     }
+ 
+@@ -410,6 +410,8 @@ public final class MainActivity extends Activity {
+ 
+         String fileName = ModelCatalog.get(selected).fileName;
+         ui.downloadPath.setText("▣  Persistent storage · Download/LocalWhisper/models/ · " + fileName);
++        ui.downloadPath.setVisibility(View.VISIBLE);
++        ui.existingModel.setVisibility(View.VISIBLE);
+ 
+         boolean selectedTransfer = selected.equals(state.modelId);
+         if (selectedTransfer && state.isActive()) {
+@@ -452,13 +454,17 @@ public final class MainActivity extends Activity {
+         ui.downloadAction.setEnabled(true);
+         ui.downloadAction.setVisibility(View.VISIBLE);
+         ui.modelStateChip.setVisibility(View.VISIBLE);
++        ui.downloadPath.setVisibility(View.VISIBLE);
++        ui.existingModel.setVisibility(View.VISIBLE);
+ 
+         if (installed) {
+-            ui.downloadTitle.setText("Model ready");
+-            ui.modelStateChip.setText("MODEL INSTALLED");
++            ui.downloadTitle.setText("Phone fallback ready");
++            ui.modelStateChip.setText("READY");
+             ui.downloadMeta.setText(backup
+-                    ? "Verified local model · persistent backup ready."
+-                    : "Verified local model · creating persistent backup…");
++                    ? "Local model is ready if the Master PC API is unavailable."
++                    : "Local model ready · finishing persistent backup.");
++            ui.downloadPath.setVisibility(View.GONE);
++            ui.existingModel.setVisibility(View.GONE);
+             ui.downloadAction.setVisibility(View.GONE);
+         } else if (backup) {
+             ui.downloadTitle.setText("Persistent model found");
+@@ -498,8 +504,8 @@ public final class MainActivity extends Activity {
+             ui.status.setTextColor(MainUi.ACCENT_DARK);
+         } else {
+             if (prefs.remoteFirst()) {
+-                ui.routeTitle.setText("Master PC first");
+-                ui.routeMeta.setText("RTX 2060 · Large v3 Turbo · Tailscale · local fallback");
++                ui.routeTitle.setText("Master PC API");
++                ui.routeMeta.setText("Private Tailscale API · RTX 2060 · Large v3 Turbo · phone fallback");
+                 ui.status.setText(db.pendingCount() > 0 ? "QUEUE " + db.pendingCount() : "READY");
+                 ui.status.setTextColor(MainUi.ACCENT_DARK);
+             } else {
+@@ -567,18 +573,26 @@ public final class MainActivity extends Activity {
+ 
+             boolean legacyModel = job.modelId == null || job.modelId.isBlank();
+             String modelId = legacyModel ? "" : job.modelId;
++            boolean viaApi = "master-pc".equals(job.engineSource);
++            boolean viaPhone = "device".equals(job.engineSource);
++            String sourceLabel = viaApi ? "MASTER PC API" : (viaPhone ? "THIS PHONE" : "UNKNOWN SOURCE");
++            TextView sourceChip = ui.newSourceChip(sourceLabel, viaApi);
++            LinearLayout.LayoutParams sourceLp = new LinearLayout.LayoutParams(-2, -2);
++            sourceLp.topMargin = ui.dp(4);
++            titleCopy.addView(sourceChip, sourceLp);
++
+             String engineText = legacyModel
+-                    ? "Legacy · model not recorded"
+-                    : ("master-pc".equals(job.engineSource) ? "Master PC · " : "On-device · ") + shortModelTitle(modelId) + " · " + performanceLabel(job.performanceProfile);
++                    ? "Model not recorded"
++                    : shortModelTitle(modelId) + " · " + performanceLabel(job.performanceProfile);
+             if (job.processingMs > 0) {
+                 engineText += " · " + formatDuration(job.processingMs) + " processing";
+                 if (job.durationMs > 0) {
+-                    double rtf = (double) job.processingMs / (double) job.durationMs;
+-                    engineText += String.format(Locale.US, " · %.2f× RT", rtf);
++                    double realtimeSpeed = (double) job.durationMs / (double) job.processingMs;
++                    engineText += String.format(Locale.US, " · %.2f× realtime", realtimeSpeed);
+                 }
+             }
+-            TextView engine = ui.newText(engineText, 10, true);
+-            engine.setTextColor(MainUi.ACCENT_DARK);
++            TextView engine = ui.newText(engineText, 10, false);
++            engine.setTextColor(MainUi.MUTED);
+             titleCopy.addView(engine);
+ 
+             LinearLayout.LayoutParams copyLp = new LinearLayout.LayoutParams(0, -2, 1f);
+@@ -694,27 +708,36 @@ public final class MainActivity extends Activity {
+             toast("Original audio is no longer available");
+             return;
+         }
++
+         ArrayList<String> labels = new ArrayList<>();
+         ArrayList<String> modelIds = new ArrayList<>();
+-        ArrayList<String> modes = new ArrayList<>();
+-        String[] performanceProfiles = {AppPrefs.PERFORMANCE_FAST, AppPrefs.PERFORMANCE_BALANCED, AppPrefs.PERFORMANCE_ACCURATE};
+-        for (ModelCatalog.ModelInfo info : ModelCatalog.all().values()) {
+-            if (!models.isInstalled(info.id)) continue;
+-            for (String mode : performanceProfiles) {
+-                labels.add(shortModelTitle(info.id) + " · " + performanceLabel(mode));
+-                modelIds.add(info.id);
+-                modes.add(mode);
+-            }
++        ArrayList<String> requestedEngines = new ArrayList<>();
++
++        labels.add("Master PC API · Large v3 Turbo");
++        modelIds.add(ModelCatalog.QUALITY);
++        requestedEngines.add("master-pc");
++
++        if (models.isInstalled(ModelCatalog.QUALITY)) {
++            labels.add("This phone · Large v3 Turbo Q5");
++            modelIds.add(ModelCatalog.QUALITY);
++            requestedEngines.add("device");
++        }
++        if (models.isInstalled(ModelCatalog.FAST)) {
++            labels.add("This phone · Base multilingual");
++            modelIds.add(ModelCatalog.FAST);
++            requestedEngines.add("device");
+         }
+-        if (labels.isEmpty()) { toast("Install a Whisper model first"); return; }
++
++        String profile = prefs.performanceProfile();
+         new AlertDialog.Builder(this)
+-                .setTitle("Re-transcribe with")
++                .setTitle("Re-transcribe using")
++                .setMessage("Choose where the audio should be processed. The result card will show the actual source.")
+                 .setItems(labels.toArray(new String[0]), (dialog, which) -> {
+-                    db.insertRetranscription(job, modelIds.get(which), modes.get(which));
++                    db.insertRetranscription(job, modelIds.get(which), profile, requestedEngines.get(which));
+                     historyPageIndex = 0;
+                     renderHistory();
+                     startTranscriptionService();
+-                    toast("Re-transcription queued");
++                    toast("Re-transcription queued · " + labels.get(which));
+                 })
+                 .setNegativeButton("Cancel", null)
+                 .show();
+diff --git a/app/src/main/java/win/fantest/localwhisper/MainUi.java b/app/src/main/java/win/fantest/localwhisper/MainUi.java
+index eb2c6f2..d65ac92 100644
+--- a/app/src/main/java/win/fantest/localwhisper/MainUi.java
++++ b/app/src/main/java/win/fantest/localwhisper/MainUi.java
+@@ -93,14 +93,14 @@ public final class MainUi {
+         LinearLayout headerCopy = new LinearLayout(activity);
+         headerCopy.setOrientation(LinearLayout.VERTICAL);
+         TextView title = text("Local Whisper", 25, true);
+-        TextView subtitle = text("Private. Master PC + on-device fallback.", 11, false);
++        TextView subtitle = text("Master PC API by default · private local fallback.", 11, false);
+         subtitle.setTextColor(MUTED);
+         headerCopy.addView(title);
+         headerCopy.addView(subtitle);
+         header.addView(headerCopy, new LinearLayout.LayoutParams(0, -2, 1f));
+ 
+         LinearLayout headerActions = horizontal();
+-        engineBadge = chip("MASTER PC", SOFT_GREEN, ACCENT_DARK);
++        engineBadge = chip("API FIRST", SOFT_GREEN, ACCENT_DARK);
+         headerActions.addView(engineBadge);
+         settingsShortcut = iconButton("⚙");
+         LinearLayout.LayoutParams gearLp = new LinearLayout.LayoutParams(dp(42), dp(42));
+@@ -109,7 +109,7 @@ public final class MainUi {
+         header.addView(headerActions);
+         content.addView(header);
+ 
+-        TextView intro = text("Voice notes use your Master PC over Tailscale by default, with local fallback.", 12, false);
++        TextView intro = text("Every result shows exactly where it was transcribed: Master PC API or this phone.", 12, false);
+         intro.setTextColor(MUTED);
+         intro.setPadding(dp(49), dp(2), dp(4), dp(4));
+         content.addView(intro);
+@@ -122,8 +122,8 @@ public final class MainUi {
+         routeRow.addView(routeIcon, new LinearLayout.LayoutParams(dp(34), dp(34)));
+         LinearLayout routeCopy = new LinearLayout(activity);
+         routeCopy.setOrientation(LinearLayout.VERTICAL);
+-        routeTitle = text("Master PC first", 15, true);
+-        routeMeta = text("RTX 2060 · Large v3 Turbo · Tailscale", 11, false);
++        routeTitle = text("Master PC API", 15, true);
++        routeMeta = text("Private Tailscale API · RTX 2060 · Large v3 Turbo", 11, false);
+         routeMeta.setTextColor(MUTED);
+         routeCopy.addView(routeTitle);
+         routeCopy.addView(routeMeta);
+@@ -133,7 +133,7 @@ public final class MainUi {
+         routeCard.addView(routeRow);
+         content.addView(routeCard, cardLp(10));
+ 
+-        TextView fallbackTitle = sectionTitle("Local fallback model");
++        TextView fallbackTitle = sectionTitle("This phone · fallback model");
+         content.addView(fallbackTitle, topLp(14));
+ 
+         // Model picker
+@@ -214,11 +214,11 @@ public final class MainUi {
+         settingsAnchor.addView(selectorTiles);
+ 
+         performanceSpinner = spinner(new String[]{
+-                "Fast · Large v3 Turbo optimized",
+-                "Balanced · difficult speech",
+-                "Maximum accuracy · beam search"
++                "Fast · recommended",
++                "Balanced · harder speech",
++                "Maximum · slowest / most accurate"
+         });
+-        LinearLayout decodeTile = selectorTile("⚡", "Performance", performanceSpinner);
++        LinearLayout decodeTile = selectorTile("⚡", "Accuracy", performanceSpinner);
+         LinearLayout.LayoutParams decodeLp = new LinearLayout.LayoutParams(-1, -2);
+         decodeLp.topMargin = dp(8);
+         settingsAnchor.addView(decodeTile, decodeLp);
+@@ -229,8 +229,8 @@ public final class MainUi {
+         settingsDivider.setLayoutParams(settingsDividerLp);
+         settingsAnchor.addView(settingsDivider);
+ 
+-        remoteFirstSwitch = toggle("☁  Master PC transcription first");
+-        remoteSummary = text("Default · RTX 2060 Large v3 Turbo over encrypted Tailscale. Falls back on-device if unreachable.", 11, false);
++        remoteFirstSwitch = toggle("☁  Use Master PC API by default");
++        remoteSummary = text("Recommended · sends audio privately to your Master PC API. If unavailable, this phone takes over.", 11, false);
+         remoteSummary.setTextColor(ACCENT_DARK);
+         remoteSummary.setPadding(dp(8), dp(2), dp(8), dp(5));
+         timestampsSwitch = toggle("◷  Include timestamps");
+@@ -256,7 +256,7 @@ public final class MainUi {
+ 
+         LinearLayout quickActions = horizontal();
+         processPending = secondaryGreenButton("▶  Process queue");
+-        quickTileButton = secondaryButton("⚡  WhatsApp tile");
++        quickTileButton = secondaryButton("⚡  Quick transcribe");
+         quickActions.addView(processPending, new LinearLayout.LayoutParams(0, dp(44), 1f));
+         LinearLayout.LayoutParams quickTileLp = new LinearLayout.LayoutParams(0, dp(44), 1f);
+         quickTileLp.leftMargin = dp(8);
+@@ -272,7 +272,7 @@ public final class MainUi {
+         content.addView(recentTitle, topLp(8));
+ 
+         historySearch = new EditText(activity);
+-        historySearch.setHint("Search transcript, model, engine or language");
++        historySearch.setHint("Search audio, transcript, API/local, model or language");
+         historySearch.setSingleLine(true);
+         historySearch.setTextSize(13);
+         historySearch.setPadding(dp(12), 0, dp(12), 0);
+@@ -303,6 +303,10 @@ public final class MainUi {
+ 
+     public TextView newText(String value, int sp, boolean bold) { return text(value, sp, bold); }
+ 
++    public TextView newSourceChip(String value, boolean remote) {
++        return chip(value, remote ? SOFT_GREEN : Color.rgb(239, 244, 249), remote ? ACCENT_DARK : Color.rgb(55, 84, 109));
++    }
++
+     public Button newSmallButton(String value) {
+         Button b = secondaryButton(value);
+         b.setTextSize(11);
+diff --git a/app/src/main/java/win/fantest/localwhisper/TranscriptDb.java b/app/src/main/java/win/fantest/localwhisper/TranscriptDb.java
+index 77b94d2..c18620c 100644
+--- a/app/src/main/java/win/fantest/localwhisper/TranscriptDb.java
++++ b/app/src/main/java/win/fantest/localwhisper/TranscriptDb.java
+@@ -11,7 +11,7 @@ import java.util.List;
+ 
+ public final class TranscriptDb extends SQLiteOpenHelper {
+     private static final String DB_NAME = "transcripts.db";
+-    private static final int DB_VERSION = 3;
++    private static final int DB_VERSION = 4;
+ 
+     public static final String PENDING = "PENDING";
+     public static final String PROCESSING = "PROCESSING";
+@@ -33,6 +33,7 @@ public final class TranscriptDb extends SQLiteOpenHelper {
+         public long processingMs;
+         public long parentId;
+         public String engineSource;
++        public String requestedEngine;
+     }
+ 
+     public TranscriptDb(Context context) {
+@@ -56,7 +57,8 @@ public final class TranscriptDb extends SQLiteOpenHelper {
+                         "performance_profile TEXT NOT NULL DEFAULT 'fast'," +
+                         "processing_ms INTEGER NOT NULL DEFAULT 0," +
+                         "parent_id INTEGER NOT NULL DEFAULT 0," +
+-                        "engine_source TEXT NOT NULL DEFAULT 'device'" +
++                        "engine_source TEXT NOT NULL DEFAULT 'device'," +
++                        "requested_engine TEXT NOT NULL DEFAULT 'auto'" +
+                         ")"
+         );
+         db.execSQL("CREATE INDEX idx_transcript_status_id ON transcript(status, id)");
+@@ -75,13 +77,20 @@ public final class TranscriptDb extends SQLiteOpenHelper {
+         if (oldVersion < 3) {
+             db.execSQL("ALTER TABLE transcript ADD COLUMN engine_source TEXT NOT NULL DEFAULT 'device'");
+         }
++        if (oldVersion < 4) {
++            db.execSQL("ALTER TABLE transcript ADD COLUMN requested_engine TEXT NOT NULL DEFAULT 'auto'");
++        }
+     }
+ 
+     public long insertPending(String name, String audioPath) {
+-        return insertPending(name, audioPath, "", AppPrefs.PERFORMANCE_FAST, 0L);
++        return insertPending(name, audioPath, "", AppPrefs.PERFORMANCE_FAST, 0L, "auto");
+     }
+ 
+     public long insertPending(String name, String audioPath, String modelId, String performanceProfile, long parentId) {
++        return insertPending(name, audioPath, modelId, performanceProfile, parentId, "auto");
++    }
++
++    public long insertPending(String name, String audioPath, String modelId, String performanceProfile, long parentId, String requestedEngine) {
+         ContentValues values = new ContentValues();
+         values.put("name", name);
+         values.put("audio_path", audioPath);
+@@ -90,11 +99,12 @@ public final class TranscriptDb extends SQLiteOpenHelper {
+         values.put("model_id", modelId == null ? "" : modelId);
+         values.put("performance_profile", performanceProfile == null ? AppPrefs.PERFORMANCE_FAST : performanceProfile);
+         values.put("parent_id", parentId);
++        values.put("requested_engine", requestedEngine == null ? "auto" : requestedEngine);
+         return getWritableDatabase().insertOrThrow("transcript", null, values);
+     }
+ 
+-    public long insertRetranscription(Job source, String modelId, String performanceProfile) {
+-        return insertPending(source.name, source.audioPath, modelId, performanceProfile, source.id);
++    public long insertRetranscription(Job source, String modelId, String performanceProfile, String requestedEngine) {
++        return insertPending(source.name, source.audioPath, modelId, performanceProfile, source.id, requestedEngine);
+     }
+ 
+     public void resetInterrupted() {
+@@ -239,6 +249,8 @@ public final class TranscriptDb extends SQLiteOpenHelper {
+         job.parentId = parentIndex >= 0 ? c.getLong(parentIndex) : 0L;
+         int engineIndex = c.getColumnIndex("engine_source");
+         job.engineSource = engineIndex >= 0 ? c.getString(engineIndex) : "device";
++        int requestedIndex = c.getColumnIndex("requested_engine");
++        job.requestedEngine = requestedIndex >= 0 ? c.getString(requestedIndex) : "auto";
+         return job;
+     }
+ }
+diff --git a/app/src/main/java/win/fantest/localwhisper/TranscriptionService.java b/app/src/main/java/win/fantest/localwhisper/TranscriptionService.java
+index 1ef40be..a5d9411 100644
+--- a/app/src/main/java/win/fantest/localwhisper/TranscriptionService.java
++++ b/app/src/main/java/win/fantest/localwhisper/TranscriptionService.java
+@@ -82,10 +82,15 @@ public final class TranscriptionService extends Service {
+ 
+             db.markProcessing(job.id, modelId, performanceProfile);
+             long started = System.currentTimeMillis();
++            String requestedEngine = job.requestedEngine == null || job.requestedEngine.isBlank()
++                    ? "auto" : job.requestedEngine;
++            boolean remoteOnly = "master-pc".equals(requestedEngine);
++            boolean localOnly = "device".equals(requestedEngine);
++            boolean tryRemote = !localOnly && (remoteOnly || prefs.remoteFirst());
+ 
+-            if (prefs.remoteFirst()) {
++            if (tryRemote) {
+                 try {
+-                    report(job, "Sending to Master PC", 5, "", remaining, true);
++                    report(job, "Master PC API · uploading audio", 5, "", remaining, true);
+                     RemoteTranscriptionClient.Result remote = RemoteTranscriptionClient.transcribe(
+                             audio,
+                             prefs.language(),
+@@ -107,19 +112,27 @@ public final class TranscriptionService extends Service {
+                             "master-pc"
+                     );
+                     liveState.complete(job.id, job.name, remote.text);
+-                    sendProgress(job, "Complete · Master PC", 100, remote.text);
++                    sendProgress(job, "Complete · Master PC API", 100, remote.text);
+                     if (!prefs.keepAudio() && db.audioReferenceCount(job.audioPath) <= 1) audio.delete();
+                     String speed = remote.durationMs > 0L
+                             ? String.format(java.util.Locale.US, " · %.2fx realtime", (double) remote.durationMs / (double) elapsed)
+                             : "";
+-                    updateNotification("Finished on Master PC · " + job.name + " · " + elapsed / 1000L + "s" + speed, 100, 100);
++                    updateNotification("Finished · Master PC API · " + job.name + " · " + elapsed / 1000L + "s" + speed, 100, 100);
+                     notifyChanged();
+                     continue;
+                 } catch (Throwable remoteError) {
+                     String reason = readableError(remoteError);
+-                    report(job, "Master PC unavailable · local fallback", -1, reason, remaining, true);
++                    if (remoteOnly) {
++                        String error = "Master PC API unavailable: " + reason;
++                        db.markFailed(job.id, error);
++                        liveState.fail(job.id, job.name, error);
++                        sendProgress(job, "Failed · Master PC API", -1, error);
++                        notifyChanged();
++                        continue;
++                    }
++                    report(job, "Master PC API unavailable · using this phone", -1, reason, remaining, true);
+                     if (!modelManager.isInstalled(modelId)) {
+-                        String error = "Master PC unavailable: " + reason + " · local model not installed";
++                        String error = "Master PC API unavailable: " + reason + " · local fallback model not installed";
+                         db.markFailed(job.id, error);
+                         liveState.fail(job.id, job.name, error);
+                         sendProgress(job, "Failed", -1, error);
+@@ -139,7 +152,7 @@ public final class TranscriptionService extends Service {
+                 continue;
+             }
+ 
+-            report(job, "Loading Whisper model locally · " + ModelCatalog.get(modelId).title, -1, "", remaining, true);
++            report(job, "This phone · loading " + ModelCatalog.get(modelId).title, -1, "", remaining, true);
+             long engine = WhisperEngineCache.acquire(model.getAbsolutePath());
+             if (engine == 0L) {
+                 String error = "Could not load local Whisper model";
+@@ -150,10 +163,10 @@ public final class TranscriptionService extends Service {
+                 continue;
+             }
+ 
+-            report(job, "Decoding voice note locally", -1, "", remaining, true);
++            report(job, "This phone · decoding audio", -1, "", remaining, true);
+             try {
+                 AudioDecoder.DecodedAudio decoded = AudioDecoder.decode(audio);
+-                report(job, "Preparing transcription locally", -1, "", remaining, true);
++                report(job, "This phone · preparing transcription", -1, "", remaining, true);
+ 
+                 String language = prefs.language();
+                 boolean timestamps = prefs.timestamps();
+@@ -186,12 +199,12 @@ public final class TranscriptionService extends Service {
+                 String finalText = result.trim();
+                 db.markDone(job.id, finalText, detected, decoded.durationMs, modelId, performanceProfile, elapsed, "device");
+                 liveState.complete(job.id, job.name, finalText);
+-                sendProgress(job, "Complete · on-device", 100, finalText);
++                sendProgress(job, "Complete · This phone", 100, finalText);
+                 if (!prefs.keepAudio() && db.audioReferenceCount(job.audioPath) <= 1) audio.delete();
+                 String speed = decoded.durationMs > 0L
+                         ? String.format(java.util.Locale.US, " · %.2fx realtime", (double) decoded.durationMs / (double) elapsed)
+                         : "";
+-                updateNotification("Finished on-device · " + job.name + " · " + elapsed / 1000L + "s" + speed, 100, 100);
++                updateNotification("Finished · This phone · " + job.name + " · " + elapsed / 1000L + "s" + speed, 100, 100);
+             } catch (Throwable t) {
+                 String error = readableError(t);
+                 db.markFailed(job.id, error);
